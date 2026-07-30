@@ -468,7 +468,6 @@ TOOLS["listen_group_msg"] = {
 
 
 # 18. send_group_msg
-
 def tool_send_group_msg(
     group_id,
     text,

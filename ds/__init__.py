@@ -4,3 +4,5 @@
 # @Time    : 2026/07/31 00:59
 # @Author  : Wu_RH
 # @FileName: __init__.py
+
+from ds.agent import DeepSeekAgent

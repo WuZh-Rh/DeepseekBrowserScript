@@ -8,7 +8,6 @@ import json
 import os
 import re
 import shutil
-import urllib
 from datetime import datetime
 from pathlib import Path
 
@@ -33,7 +32,6 @@ def resolve_path(file_path):
     return str(Path(config["WORKING_DIR"]) / p)
 
 
-
 def truncate(s, max_len=None):
     if max_len is None:
         max_len = config["MAX_OUTPUT_LENGTH"]
@@ -41,8 +39,7 @@ def truncate(s, max_len=None):
     if len(s) <= max_len:
         return s
     half = max_len // 2
-    return (s[:half] + f"\n\n⚠ [输出已截断 — 共 {len(s):,} 字符，仅显示开头和结尾各 {half} 字符]\n\n" + s[-half:])
-
+    return s[:half] + f"\n\n⚠ [输出已截断 — 共 {len(s):,} 字符，仅显示开头和结尾各 {half} 字符]\n\n" + s[-half:]
 
 
 # 1. read_file
@@ -198,7 +195,7 @@ def tool_list_directory(path=".", recursive=False, show_hidden=False):
                     continue
                 full = os.path.join(root, f)
                 size = format_bytes(os.path.getsize(full)) if os.path.isfile(full) else ""
-                results.append(f"📄  {os.path.join(rel_root, f)}  {size}")
+                results.append(f"📄  {os.path.join(str(rel_root), f)}  {size}")
             if len(results) > 300:
                 results = results[:300]
                 break
@@ -318,6 +315,7 @@ TOOLS["get_file_info"] = {
     "execute": tool_get_file_info,
 }
 
+
 # 12. find_files
 def tool_find_files(pattern, directory=".", exclude=None):
     root = resolve_path(directory)
@@ -341,7 +339,7 @@ def tool_find_files(pattern, directory=".", exclude=None):
             break
     if not results:
         return f"在 {directory} 中未找到匹配 \"{pattern}\" 的文件"
-    return "\n".join(results)
+    return "\n".join([str(result_str) for result_str in results])
 
 
 TOOLS["find_files"] = {
@@ -386,9 +384,10 @@ def tool_search_in_files(pattern, directory=".", file_pattern=None, case_sensiti
                 continue
             for i, line in enumerate(lines):
                 if search_re.search(line):
-                    start = max(0, i - context_lines)
-                    end = min(len(lines), i + context_lines + 1)
-                    context = "\n".join(f"{idx + 1}: {lines[idx].rstrip()}" for idx in range(start, end))
+                    # start = max(0, i - context_lines)
+                    # end = min(len(lines), i + context_lines + 1)
+                    # context = "\n".join(f"{idx + 1}: {lines[idx].rstrip()}" for idx in range(start, end))
+                    # matches.append(f"{full}:{i + 1} 附近:\n{context}")
                     matches.append(f"{full}:{i + 1}: {line.strip()}")
                     if len(matches) >= max_matches:
                         break
@@ -439,7 +438,6 @@ TOOLS["read_url"] = {
     "parameters": {"url": {"type": "string", "required": True, "description": "要获取的完整 URL"}},
     "execute": tool_read_url,
 }
-
 
 
 # 15. write_files

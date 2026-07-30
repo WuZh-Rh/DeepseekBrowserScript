@@ -15,7 +15,7 @@ from ds.config import config
 
 
 # ---- 工具函数辅助 ----
-def fetch_message_by_id(message_id, group_id=None):
+def fetch_message_by_id(message_id):
     """调用 /get_msg 接口获取单条消息完整内容"""
     host = config["QQ_API_HOST"]
     port = config["QQ_API_PORT"]
@@ -33,7 +33,90 @@ def fetch_message_by_id(message_id, group_id=None):
     return None
 
 
-def format_message_list(messages, limit, reply_id):
+def get_msg(message_id):
+    """
+    调用 /get_msg 接口获取单条消息的完整数据。
+    返回消息数据（dict）或 None。
+    """
+    host = config["QQ_API_HOST"]
+    port = config["QQ_API_PORT"]
+    try:
+        resp = requests.post(
+            f"http://{host}:{port}/get_msg",
+            json={"message_id": message_id},
+            timeout=10
+        )
+        data = resp.json()
+        if data.get('status') == 'ok':
+            return data.get('data')
+    except:
+        pass
+    return None
+
+
+def get_reply_chain(message_id, depth=20, _seen=None):
+    """返回嵌套 JSON：{"message": {...}, "reply_to": {...}}"""
+    if _seen is None:
+        _seen = set()
+    if not message_id or depth <= 0 or message_id in _seen:
+        return None
+    _seen.add(message_id)
+
+    msg = get_msg(message_id)
+    if not msg:
+        return None
+
+    child_id = None
+    for seg in msg.get('message', []):
+        if seg.get('type') == 'reply':
+            child_id = seg.get('data', {}).get('id')
+            break
+
+    return {
+        "message": msg,
+        "reply_to": get_reply_chain(child_id, depth-1, _seen) if child_id else None
+    }
+
+
+def _format_chain_node(chain_node):
+    """
+    递归遍历回复链 JSON，生成带缩进的文本。
+    不调用 format_message_list，只处理 JSON 结构。
+    """
+    if not chain_node:
+        return ""
+
+    parts = []
+    level = 0
+    current = chain_node
+
+    while current:
+        msg_data = current.get("message")
+        if not msg_data:
+            break
+
+        # 复制消息数据，移除里面的 reply 节点（避免 format_message_list 递归）
+        clean_msg = msg_data.copy()
+        clean_msg["message"] = [
+            seg for seg in clean_msg.get("message", [])
+            if seg.get("type") != "reply"
+        ]
+
+        # 格式化清理后的消息（depth=0 确保不处理回复）
+        msg_text = format_message_list([clean_msg], 1, None)
+        indent = "    " * level
+        indented = "\n    ".join(msg_text.splitlines())
+
+        parts.append(f"{indent}↩️ 回复了: {indented}")
+
+        # 移到下一层
+        current = current.get("reply_to")
+        level += 1
+
+    return "\n".join(parts)
+
+
+def format_message_list(messages, limit, reply_id=None):
     """
     将消息列表格式化为人类可读的文本，保持原始消息段顺序。
     完整解析 sender、message 数组中的所有字段。
@@ -53,23 +136,38 @@ def format_message_list(messages, limit, reply_id):
         role = sender.get('role', '')
         self_id = msg.get('self_id')  # 机器人自己的QQ号
 
-        # 构建显示名：优先 card，其次 nickname，最后 user_id
+        # 构建显示名：全部显示（群名片、QQ昵称、QQ号）
+        name_parts = []
         if card:
-            display_name = card
-        elif nickname:
-            display_name = nickname
-        else:
-            display_name = f"QQ{user_id}" if user_id else "未知用户"
+            name_parts.append(card)
+        if nickname and nickname != card:
+            name_parts.append(nickname)
+        elif nickname and nickname == card:
+            # 即使相同也加上，用括号区分（用户要求全部加上）
+            name_parts.append(nickname)
+        if user_id:
+            name_parts.append(str(user_id))
+        if not name_parts:
+            name_parts.append("未知用户")
 
-        # 如果发送者是机器人自己，加 [我] 标记
+        # 用括号连接各部分，格式：card(nickname)(user_id)
+        display_name = "".join([f"({part})" if i > 0 or not card else part for i, part in enumerate(name_parts)])
+        # 如果 card 存在，则 card 不加括号；后续加括号
+        # 但上面的表达式复杂，简单重写：
+        display_name = ""
+        if card:
+            display_name += card
+        if nickname:
+            display_name += f"({nickname})"
+        if user_id:
+            display_name += f"({user_id})"
+        if not display_name:
+            display_name = "未知用户"
+
+        # 如果 self_id 匹配，加 [我] 前缀（保留）
         if self_id and str(user_id) == str(self_id):
             display_name = f"[我] {display_name}"
-
-        # 附加QQ号
-        if user_id:
-            display_name = f"{display_name}({user_id})"
-
-        # 如果有 role（admin/member/owner）也加上
+        # 如果 role 存在，追加角色（保留）
         if role:
             role_map = {'admin': '管理员', 'owner': '群主', 'member': '成员'}
             display_name = f"{display_name}[{role_map.get(role, role)}]"
@@ -100,48 +198,47 @@ def format_message_list(messages, limit, reply_id):
             elif seg_type == 'at':
                 qq = data.get('qq', '')
                 name = data.get('name', '')
-                if name:
-                    parts.append(f"@{name}({qq})")
-                else:
-                    parts.append(f"@{qq}")
+                parts.append(f"@{name}({qq})" if name else f"@{qq}")
 
             elif seg_type == 'reply':
-                reply_id_ = data.get('id', '')
-                sender_info = data.get('sender', {})
-                sender_name = sender_info.get('nickname') or sender_info.get('card') or data.get('qq', '未知用户')
-                reply_text = data.get('text', '') or data.get('content', '')
-                if len(reply_text) > 50:
-                    reply_text = reply_text[:50] + "…"
-                if reply_text:
-                    parts.append(f"↩️ 回复 @{sender_name}: “{reply_text}”")
-                else:
-                    parts.append(f"↩️ 回复 @{sender_name} 的消息")
+                reply_msg_id = data.get('id', '')
+                if not reply_msg_id:
+                    parts.append("[无效回复]")
+                    continue
+
+                chain = {
+                    "message": msg,
+                    "reply_to": get_reply_chain(reply_msg_id),
+                }
+                if not chain:
+                    parts.append("[获取回复失败]")
+                    continue
+
+                parts = ["回复消息栈: \n" + _format_chain_node(chain)]
+                break
 
             elif seg_type == 'image':
                 file = data.get('file', '')
                 url = data.get('url', '')
                 if url:
-                    parts.append(f"[图片: {url[:50]}...]")
+                    parts.append(f"[图片: {url[:80]}{'...' if len(url) > 80 else ''}]")
                 elif file:
-                    parts.append(f"[图片: {file}]")
+                    parts.append(f"[图片: {file[:80]}{'...' if len(file) > 80 else ''}]")
                 else:
                     parts.append("[图片]")
 
             elif seg_type == 'face':
                 face_id = data.get('id', '')
                 face_name = data.get('name', '')
-                if face_name:
-                    parts.append(f"[表情: {face_name}]")
-                else:
-                    parts.append(f"[表情:{face_id}]")
+                parts.append(f"[表情: {face_name}]" if face_name else f"[表情:{face_id}]")
 
             elif seg_type == 'record':
                 file = data.get('file', '')
-                parts.append(f"[语音: {file}]" if file else "[语音]")
+                parts.append(f"[语音: {file[:80]}{'...' if len(file) > 80 else ''}]" if file else "[语音]")
 
             elif seg_type == 'video':
                 file = data.get('file', '')
-                parts.append(f"[视频: {file}]" if file else "[视频]")
+                parts.append(f"[视频: {file[:80]}{'...' if len(file) > 80 else ''}]" if file else "[视频]")
 
             elif seg_type == 'file':
                 file_name = data.get('name', '')
@@ -159,10 +256,32 @@ def format_message_list(messages, limit, reply_id):
             elif seg_type == 'music':
                 music_type = data.get('type', '')
                 title = data.get('title', '')
-                if title:
-                    parts.append(f"[音乐: {title}]")
+                music_id = data.get('id', '')
+                url = data.get('url', '')
+                audio = data.get('audio', '')
+                image = data.get('image', '')
+
+                if music_type in ('qq', '163'):
+                    # 标准音乐（QQ/网易云）
+                    if title:
+                        parts.append(f"[音乐 {music_type}: {title} (ID: {music_id})]")
+                    else:
+                        parts.append(f"[音乐 {music_type}: ID {music_id}]")
+                elif music_type == 'custom':
+                    # 自定义音乐（分享链接）
+                    info = []
+                    if title:
+                        info.append(f"标题: {title}")
+                    if url:
+                        info.append(f"链接: {url[:60]}{'...' if len(url) > 60 else ''}")
+                    if audio:
+                        info.append(f"音频: {audio[:30]}{'...' if len(audio) > 30 else ''}")
+                    if image:
+                        info.append(f"封面: {image[:30]}{'...' if len(image) > 30 else ''}")
+                    parts.append(f"[自定义音乐: {' | '.join(info)}]")
                 else:
-                    parts.append("[音乐]")
+                    # 未知格式，保留完整 JSON 以防丢失信息
+                    parts.append(f"[音乐: {json.dumps(data, ensure_ascii=False)}]")
 
             elif seg_type == 'dice':
                 value = data.get('value', '')
@@ -464,7 +583,7 @@ if __name__ == "__main__":
         group_id=GROUP_ID,
         trigger='keyword',
         keyword="1",
-        timeout=2,          # 2分钟，够你发消息了
+        timeout=0,          # 2分钟，够你发消息了
         history_limit=100
     )
     print("\n监听结果：")

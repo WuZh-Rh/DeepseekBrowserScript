@@ -9,7 +9,7 @@
 import time
 from playwright.sync_api import sync_playwright
 from pathlib import Path
-from .config import config
+from .config import CONFIG
 from .logger import logger
 
 
@@ -24,13 +24,13 @@ class DeepSeekBrowser:
     def launch(self):
         logger.info("正在启动浏览器，使用持久化会话...")
         self.playwright = sync_playwright().start()
-        session_dir = Path(config["SESSION_DIR"])
+        session_dir = Path(CONFIG["SESSION_DIR"])
         session_dir.mkdir(parents=True, exist_ok=True)
 
         # 持久化上下文
         self.context = self.playwright.chromium.launch_persistent_context(
             user_data_dir=str(session_dir),
-            headless=config["HEADLESS"],
+            headless=CONFIG["HEADLESS"],
             viewport={"width": 1280, "height": 900},
             user_agent="Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
             args=[
@@ -53,7 +53,7 @@ class DeepSeekBrowser:
             Object.defineProperty(navigator, 'webdriver', { get: () => false });
         """)
 
-        self._navigate(config["DEEPSEEK_URL"])
+        self._navigate(CONFIG["DEEPSEEK_URL"])
         self._ensure_logged_in()
         logger.success("浏览器已就绪！")
 
@@ -97,7 +97,7 @@ class DeepSeekBrowser:
             except:
                 pass
         # 后备：导航到首页
-        self._navigate(config["DEEPSEEK_URL"])
+        self._navigate(CONFIG["DEEPSEEK_URL"])
         logger.dim("已导航到 DeepSeek 首页（新对话）")
 
     def _ensure_logged_in(self):
@@ -149,7 +149,7 @@ class DeepSeekBrowser:
                     element.dispatchEvent(new InputEvent('input', { bubbles: true, data: content }));
                 }
             """, el, text)
-        time.sleep(config["SEND_DELAY"] / 1000.0)
+        time.sleep(CONFIG["SEND_DELAY"] / 1000.0)
         clicked = self._click_send_button()
         if not clicked:
             self.page.keyboard.press("Enter")
@@ -201,8 +201,8 @@ class DeepSeekBrowser:
         return False
 
     def wait_for_response(self):
-        timeout = config["RESPONSE_TIMEOUT"] / 1000.0
-        stable_delay = config["STABLE_DELAY"] / 1000.0
+        timeout = CONFIG["RESPONSE_TIMEOUT"] / 1000.0
+        stable_delay = CONFIG["STABLE_DELAY"] / 1000.0
         start = time.time()
         # 阶段1：等待新消息出现
         initial_count = self._get_message_count()

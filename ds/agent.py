@@ -10,7 +10,7 @@ import sys
 import subprocess
 import traceback
 from pathlib import Path
-from .config import config
+from .config import CONFIG
 from .logger import logger
 from .browser import DeepSeekBrowser
 from ds.agentTools import execute_tool
@@ -37,7 +37,7 @@ class DeepSeekAgent:
         self.browser.close()
 
     def _get_working_dir_listing(self):
-        cwd = config["WORKING_DIR"]
+        cwd = CONFIG["WORKING_DIR"]
         try:
             if sys.platform == 'win32':
                 # PowerShell 递归列出文件
@@ -77,7 +77,7 @@ class DeepSeekAgent:
             result = subprocess.run(
                 str(abs_path),
                 shell=True,
-                cwd=config["WORKING_DIR"],
+                cwd=CONFIG["WORKING_DIR"],
                 capture_output=True,
                 text=True,
                 env=env,
@@ -91,7 +91,7 @@ class DeepSeekAgent:
 
     def run(self, task):
         self._running = True
-        max_iter = config["MAX_ITERATIONS"]
+        max_iter = CONFIG["MAX_ITERATIONS"]
 
         # 目录快照
         dir_listing = self._get_working_dir_listing()
@@ -99,7 +99,7 @@ class DeepSeekAgent:
         logger.header(f"任务: {task[:80]}{'…' if len(task)>80 else ''}")
 
         first_msg = self.conversation.build_first_message(task, dir_listing)
-        if config["DEBUG"]:
+        if CONFIG["DEBUG"]:
             logger.dim("--- 第一条消息（已截断）---")
             logger.dim(first_msg[:600] + "...")
 
@@ -118,7 +118,7 @@ class DeepSeekAgent:
                 self.browser.send_message("请继续。如果你在等待输入，请做出最佳判断后继续。")
                 continue
 
-            if config["DEBUG"]:
+            if CONFIG["DEBUG"]:
                 logger.dim(f"--- 原始响应（{len(raw_response)} 字符）---")
                 logger.dim(raw_response[:400])
 

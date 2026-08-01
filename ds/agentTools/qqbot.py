@@ -11,14 +11,14 @@ from datetime import datetime
 import requests
 
 from ds.agentTools import TOOLS
-from ds.config import config
+from ds.config import CONFIG
 
 
 # ---- 工具函数辅助 ----
 def fetch_message_by_id(message_id):
     """调用 /get_msg 接口获取单条消息完整内容"""
-    host = config["QQ_API_HOST"]
-    port = config["QQ_API_PORT"]
+    host = CONFIG["QQ_API_HOST"]
+    port = CONFIG["QQ_API_PORT"]
     try:
         resp = requests.post(
             f"http://{host}:{port}/get_msg",
@@ -38,8 +38,8 @@ def get_msg(message_id):
     调用 /get_msg 接口获取单条消息的完整数据。
     返回消息数据（dict）或 None。
     """
-    host = config["QQ_API_HOST"]
-    port = config["QQ_API_PORT"]
+    host = CONFIG["QQ_API_HOST"]
+    port = CONFIG["QQ_API_PORT"]
     try:
         resp = requests.post(
             f"http://{host}:{port}/get_msg",
@@ -339,8 +339,8 @@ def _get_bot_qq():
     if hasattr(_get_bot_qq, "_cache"):
         return _get_bot_qq.cache
 
-    host = config["QQ_API_HOST"]
-    port = config["QQ_API_PORT"]
+    host = CONFIG["QQ_API_HOST"]
+    port = CONFIG["QQ_API_PORT"]
     try:
         resp = requests.get(f"http://{host}:{port}/get_login_info", timeout=5)
         data = resp.json()
@@ -368,9 +368,9 @@ def tool_listen_group_msg(
     timeout: 分钟，默认5
     history_limit: 返回消息条数，默认5
     """
-    host = config["QQ_API_HOST"]
-    port = config["QQ_API_PORT"]
-    poll_interval = config["QQ_POLL_INTERVAL"]  # 秒
+    host = CONFIG["QQ_API_HOST"]
+    port = CONFIG["QQ_API_PORT"]
+    poll_interval = CONFIG["QQ_POLL_INTERVAL"]  # 秒
     bot_qq = _get_bot_qq()
     fetch_count = history_limit if history_limit > fetch_count else fetch_count
 
@@ -475,10 +475,10 @@ def tool_send_group_msg(
     timeout=None,
     history_limit=10
 ):
-    host = config["QQ_API_HOST"]
-    port = config["QQ_API_PORT"]
-    poll_interval = config["QQ_POLL_INTERVAL"]  # 秒
-    timeout_sec = (timeout or config["QQ_POLL_TIMEOUT"]) * 60  # 转秒
+    host = CONFIG["QQ_API_HOST"]
+    port = CONFIG["QQ_API_PORT"]
+    poll_interval = CONFIG["QQ_POLL_INTERVAL"]  # 秒
+    timeout_sec = (timeout or CONFIG["QQ_POLL_TIMEOUT"]) * 60  # 转秒
 
     # 1. 构造消息段
     segments = []

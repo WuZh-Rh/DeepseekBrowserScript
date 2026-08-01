@@ -11,9 +11,9 @@ import argparse
 import signal
 import traceback
 from pathlib import Path
-from .config import config
-from .logger import logger, init_log_file
-from .agent import DeepSeekAgent
+from ds.config import CONFIG
+from ds.logger import logger, init_log_file
+from ds.agent import DeepSeekAgent
 
 SELF_PATH = os.getcwd()
 
@@ -53,22 +53,22 @@ def main():
 
     # 应用选项到配置
     if args.debug:
-        config["DEBUG"] = True
+        CONFIG["DEBUG"] = True
     if args.headless:
-        config["HEADLESS"] = True
+        CONFIG["HEADLESS"] = True
     if args.working_dir:
         resolved = Path(args.working_dir).resolve()
         if not resolved.exists():
             logger.error(f"工作目录不存在: {resolved}")
             sys.exit(1)
-        config["WORKING_DIR"] = str(resolved)
+        CONFIG["WORKING_DIR"] = str(resolved)
     if args.test_bat:
-        config["TEST_BAT_PATH"] = str(Path(args.test_bat).resolve())
+        CONFIG["TEST_BAT_PATH"] = str(Path(args.test_bat).resolve())
     if args.max_iterations is not None:
         if args.max_iterations < 1:
             logger.error("--max-iterations 必须是正整数")
             sys.exit(1)
-        config["MAX_ITERATIONS"] = args.max_iterations
+        CONFIG["MAX_ITERATIONS"] = args.max_iterations
 
     # 初始化日志
     if sys.platform == 'win32':
@@ -100,11 +100,11 @@ def main():
 
     # 打印横幅
     logger.banner()
-    logger.info(f"工作目录 : {config['WORKING_DIR']}")
-    logger.info(f"会话目录 : {config['SESSION_DIR']}")
-    logger.info(f"无头模式   : {config['HEADLESS']}")
-    logger.info(f"调试模式   : {config['DEBUG']}")
-    logger.info(f"最大轮数   : {config['MAX_ITERATIONS']}")
+    logger.info(f"工作目录 : {CONFIG['WORKING_DIR']}")
+    logger.info(f"会话目录 : {CONFIG['SESSION_DIR']}")
+    logger.info(f"无头模式   : {CONFIG['HEADLESS']}")
+    logger.info(f"调试模式   : {CONFIG['DEBUG']}")
+    logger.info(f"最大轮数   : {CONFIG['MAX_ITERATIONS']}")
     if args.log_file:
         logger.info(f"日志文件   : {args.log_file}")
     else:

@@ -7,13 +7,13 @@
 # src/prompt.py
 import platform
 from datetime import datetime
-from .config import config
+from .config import CONFIG
 from ds.agentTools import get_tool_descriptions
 
 
 def build_system_prompt():
     tool_docs = get_tool_descriptions()
-    cwd = config["WORKING_DIR"]
+    cwd = CONFIG["WORKING_DIR"]
     plat = f"{platform.system()} {platform.release()}"
     node_ver = "Python " + platform.python_version()
     now = datetime.now().isoformat()

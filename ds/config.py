@@ -28,12 +28,14 @@ DEFAULT_CONFIG = {
     "TEST_BAT_PATH": None,
 }
 
+
 def load_json(path):
     try:
         with open(path, 'r', encoding='utf-8') as f:
             return json.load(f)
     except:
         return {}
+
 
 def get_config():
     config = DEFAULT_CONFIG.copy()
@@ -46,4 +48,5 @@ def get_config():
     (HOME / ".deepseek-agent" / "logs").mkdir(parents=True, exist_ok=True)
     return config
 
-config = get_config()
+
+CONFIG = get_config()

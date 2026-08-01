@@ -10,19 +10,19 @@ import sys
 from pathlib import Path
 
 from ds.agentTools import TOOLS
-from ds.config import config
+from ds.config import CONFIG
 
 
 def resolve_path(file_path):
     p = Path(file_path)
     if p.is_absolute():
         return str(p)
-    return str(Path(config["WORKING_DIR"]) / p)
+    return str(Path(CONFIG["WORKING_DIR"]) / p)
 
 
 def truncate(s, max_len=None):
     if max_len is None:
-        max_len = config["MAX_OUTPUT_LENGTH"]
+        max_len = CONFIG["MAX_OUTPUT_LENGTH"]
     s = str(s)
     if len(s) <= max_len:
         return s
@@ -32,7 +32,7 @@ def truncate(s, max_len=None):
 
 # 11. run_command
 def tool_run_command(command, cwd=None, timeout=60, env=None):
-    work_dir = resolve_path(cwd) if cwd else config["WORKING_DIR"]
+    work_dir = resolve_path(cwd) if cwd else CONFIG["WORKING_DIR"]
     env_vars = {**os.environ, **(env or {})}
     try:
         result = subprocess.run(
@@ -68,7 +68,7 @@ TOOLS["run_command"] = {
 
 # 16. run_test
 def tool_run_test():
-    test_path = config.get("TEST_BAT_PATH")
+    test_path = CONFIG.get("TEST_BAT_PATH")
     if not test_path:
         # 没有测试脚本，视为通过
         return None
@@ -80,7 +80,7 @@ def tool_run_test():
         result = subprocess.run(
             str(abs_test),
             shell=True,
-            cwd=config["WORKING_DIR"],
+            cwd=CONFIG["WORKING_DIR"],
             capture_output=True,
             text=True,
             env={**os.environ, "DSA_LOG_FILE": os.environ.get("DSA_LOG_FILE", "")}

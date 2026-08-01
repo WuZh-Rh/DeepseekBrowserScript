@@ -9,7 +9,7 @@
 import sys
 import time
 from playwright.sync_api import sync_playwright
-from .config import config
+from .config import CONFIG
 from .logger import logger
 
 def calibrate():
@@ -19,7 +19,7 @@ def calibrate():
 
     with sync_playwright() as p:
         context = p.chromium.launch_persistent_context(
-            user_data_dir=config["SESSION_DIR"],
+            user_data_dir=CONFIG["SESSION_DIR"],
             headless=False,
             viewport={"width": 1280, "height": 900},
         )
@@ -28,8 +28,8 @@ def calibrate():
         else:
             page = context.new_page()
 
-        print("→ Navigating to", config["DEEPSEEK_URL"], "...")
-        page.goto(config["DEEPSEEK_URL"], wait_until="domcontentloaded", timeout=30000)
+        print("→ Navigating to", CONFIG["DEEPSEEK_URL"], "...")
+        page.goto(CONFIG["DEEPSEEK_URL"], wait_until="domcontentloaded", timeout=30000)
         time.sleep(3)
 
         print("→ Inspecting DOM...\n")

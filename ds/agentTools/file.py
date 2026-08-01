@@ -14,7 +14,7 @@ from pathlib import Path
 import requests
 
 from ds.agentTools import TOOLS
-from ds.config import config
+from ds.config import CONFIG
 
 
 def format_bytes(size):
@@ -29,12 +29,12 @@ def resolve_path(file_path):
     p = Path(file_path)
     if p.is_absolute():
         return str(p)
-    return str(Path(config["WORKING_DIR"]) / p)
+    return str(Path(CONFIG["WORKING_DIR"]) / p)
 
 
 def truncate(s, max_len=None):
     if max_len is None:
-        max_len = config["MAX_OUTPUT_LENGTH"]
+        max_len = CONFIG["MAX_OUTPUT_LENGTH"]
     s = str(s)
     if len(s) <= max_len:
         return s

@@ -3,7 +3,7 @@
 #
 # @Time    : 2026/07/31 00:45
 # @Author  : Wu_RH
-# @FileName: parser.py.py
+# @FileName: parser.py
 # src/parser.py
 import re
 import json

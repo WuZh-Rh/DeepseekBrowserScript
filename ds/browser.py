@@ -5,8 +5,8 @@
 # @Author  : Wu_RH
 # @FileName: browser.py
 # src/browser.py
+
 import time
-import sys
 from playwright.sync_api import sync_playwright
 from pathlib import Path
 from .config import config
@@ -431,3 +431,168 @@ class DeepSeekBrowser:
     def screenshot(self, file_path="/tmp/deepseek-agent-debug.png"):
         self.page.screenshot(path=file_path, full_page=False)
         logger.info(f"截屏已保存: {file_path}")
+
+    def open_sidebar(self):
+        """确保侧边栏展开。如果侧边栏已打开则忽略，否则点击汉堡菜单按钮。"""
+        # 先检查侧边栏是否已可见（通过历史列表容器是否存在且可见）
+        sidebar_visible = self.page.evaluate("""
+            () => {
+                const container = document.querySelector('[class*="sidebar"], [class*="history"], [class*="conversation-list"]');
+                if (!container) return false;
+                const rect = container.getBoundingClientRect();
+                return rect.width > 0 && rect.height > 0;
+            }
+        """)
+        if sidebar_visible:
+            return
+
+        # 尝试点击汉堡菜单按钮（通常在左上角）
+        menu_selectors = [
+            'button[aria-label*="menu" i]',
+            'button[aria-label*="sidebar" i]',
+            'button[aria-label*="history" i]',
+            '[class*="menu-btn"]',
+            '[class*="hamburger"]',
+            '[class*="sidebar-toggle"]',
+            'button:has(svg path[d*="M3 6h10M3 10h10M3 14h10"])',  # 三条横线图标
+        ]
+        for sel in menu_selectors:
+            try:
+                btn = self.page.query_selector(sel)
+                if btn and btn.is_visible() and btn.is_enabled():
+                    btn.click()
+                    time.sleep(0.5)
+                    return
+            except:
+                pass
+        # logger.warn("未找到侧边栏切换按钮，可能已经展开或页面结构变化")
+
+    def list_chats(self):
+        """获取侧边栏中所有对话的标题列表（按显示顺序）"""
+        self.open_sidebar()
+        # 等待列表加载
+        self.page.wait_for_selector('[class*="c08e6e93"]', timeout=5000, state="attached")
+        titles = self.page.evaluate("""
+            () => {
+                // 根据你提供的 HTML，标题在 div.c08e6e93 中
+                const items = document.querySelectorAll('[class*="c08e6e93"]');
+                return Array.from(items).map(el => el.textContent.trim()).filter(t => t.length > 0);
+            }
+        """)
+        return titles
+
+    def select_chat_by_title(self, title, partial_match=True):
+        """
+        根据标题选择对话。
+        :param title: 要匹配的标题
+        :param partial_match: 是否进行部分匹配（默认 True）
+        """
+        self.open_sidebar()
+        # 找到包含标题的 a 标签（整个条目可点击）
+        if partial_match:
+            selector = f'a:has(div[class*="c08e6e93"]:has-text("{title}"))'
+        else:
+            selector = f'a:has(div[class*="c08e6e93"]:text-is("{title}"))'
+        try:
+            link = self.page.wait_for_selector(selector, timeout=3000, state="visible")
+            link.click()
+            time.sleep(1.5)  # 等待页面切换
+            logger.info(f"已切换到对话：{title}")
+        except Exception as e:
+            # 降级方案：遍历所有条目，用 javascript 匹配
+            clicked = self.page.evaluate("""
+                (targetTitle, partial) => {
+                    const items = document.querySelectorAll('a[href*="/a/chat/s/"]');
+                    for (const a of items) {
+                        const div = a.querySelector('[class*="c08e6e93"]');
+                        if (!div) continue;
+                        const text = div.textContent.trim();
+                        if (partial ? text.includes(targetTitle) : text === targetTitle) {
+                            a.click();
+                            return true;
+                        }
+                    }
+                    return false;
+                }
+            """, title, partial_match)
+            if not clicked:
+                raise RuntimeError(f"未找到标题为 '{title}' 的对话")
+
+    def select_chat_by_index(self, index):
+        """
+        根据索引选择对话（0 为第一条）。
+        """
+        self.open_sidebar()
+        # 获取所有对话条目（a 标签）
+        links = self.page.query_selector_all('a[href*="/a/chat/s/"]')
+        if index >= len(links):
+            raise IndexError(f"索引 {index} 超出范围，共有 {len(links)} 个对话")
+        link = links[index]
+        # 确保可见
+        link.scroll_into_view_if_needed()
+        link.click()
+        time.sleep(1.5)
+        logger.info(f"已选择索引 {index} 的对话")
+
+    def get_current_chat_title(self):
+        """获取当前正在查看的对话标题（从页面顶部或 URL 推断）"""
+        # 尝试从页面顶部的标题元素获取
+        title_sel = '[class*="chat-title"], [class*="conversation-title"], header [class*="title"]'
+        try:
+            el = self.page.query_selector(title_sel)
+            if el:
+                return el.text_content().strip()
+        except:
+            pass
+        # 降级：从 URL 中提取 chat id，然后从侧边栏匹配
+        url = self.page.url
+        import re
+        match = re.search(r'/a/chat/s/([a-f0-9-]+)', url)
+        if match:
+            chat_id = match.group(1)
+            # 在侧边栏中查找对应的标题
+            title = self.page.evaluate("""
+                (cid) => {
+                    const items = document.querySelectorAll('a[href*="/a/chat/s/"]');
+                    for (const a of items) {
+                        if (a.href.includes(cid)) {
+                            const div = a.querySelector('[class*="c08e6e93"]');
+                            return div ? div.textContent.trim() : null;
+                        }
+                    }
+                    return null;
+                }
+            """, chat_id)
+            return title
+        return None
+
+    # ----- 获取工具调用记录（纯 Python 解析） -----
+    def get_tool_calls_history(self):
+        """获取当前页面所有助手消息中的工具调用记录"""
+        from .parser import parse_response
+
+        # 获取所有助手消息文本
+        messages = self.page.evaluate("""
+            () => {
+                const selectors = ['.ds-assistant-message-main-content', '[data-role="assistant"]'];
+                let msgs = [];
+                for (const sel of selectors) {
+                    const els = document.querySelectorAll(sel);
+                    if (els.length) {
+                        msgs = Array.from(els);
+                        break;
+                    }
+                }
+                return msgs.map(el => el.innerText || el.textContent || '');
+            }
+        """)
+
+        results = []
+        for msg in messages:
+            parsed = parse_response(msg)
+            if parsed and parsed.get('type') == 'tool_call':
+                results.append({
+                    'tool_name': parsed.get('name'),
+                    'args': parsed.get('args'),
+                })
+        return results

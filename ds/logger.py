@@ -56,55 +56,58 @@ _log_stream: Optional[TextIOWrapper] = None
 _log_is_fixed: bool = False
 
 
-def init_log_file(log_path, is_fixed=False):
+def init_log_file(
+    log_file_path,
+    is_fixed=False,
+    roll_name="",
+):
     global _log_stream, _log_is_fixed
     if _log_stream:
         return
-    if not log_path:
+    if not log_file_path:
         return
     try:
+        _log_is_fixed = is_fixed
+        log_file = Path(log_file_path)
         if is_fixed:
             # 固定文件模式
-            log_file = Path(log_path)
             log_file.parent.mkdir(parents=True, exist_ok=True)
             _log_stream = open(log_file, 'a', encoding='utf-8')
             _log_stream.write(f"[{local_timestamp()}] === 会话开始 ===\n")
             _log_stream.flush()
             logger.info(f"[Logger] 日志写入固定文件: {log_file}")
-        else:
-            # 滚动模式
-            log_dir = Path(log_path)
-            log_dir.mkdir(parents=True, exist_ok=True)
-            latest_path = log_dir / "latest.log"
-            # 归档旧日志
-            if latest_path.exists():
-                mtime = datetime.fromtimestamp(latest_path.stat().st_mtime)
-                date_str = mtime.strftime("%Y-%m-%d")
-                date_dir = log_dir / date_str
-                date_dir.mkdir(exist_ok=True)
-                # 找最大索引
-                existing = [f for f in date_dir.iterdir() if f.suffix == '.log' and f.stem.startswith(date_str)]
-                max_idx = -1
-                for f in existing:
-                    parts = f.stem.split('-')
-                    if len(parts) >= 2:
-                        try:
-                            idx = int(parts[-1])
-                            if idx > max_idx:
-                                max_idx = idx
-                        except:
-                            pass
-                next_idx = max_idx + 1
-                archived_name = f"{date_str}-{next_idx:04d}.log"
-                archived_path = date_dir / archived_name
-                latest_path.rename(archived_path)
-                logger.info(f"[Logger] 已归档旧日志: {archived_name}")
-            # 创建新的 latest.log
-            _log_stream = open(latest_path, 'a', encoding='utf-8')
-            _log_stream.write(f"[{local_timestamp()}] === 会话开始 ===\n")
-            _log_stream.flush()
-            logger.info(f"[Logger] 日志写入滚动文件: {latest_path}")
-        _log_is_fixed = is_fixed
+            return
+        # 滚动模式
+        log_dir = log_file.parent
+        log_dir.mkdir(parents=True, exist_ok=True)
+        # 归档旧日志
+        if log_file.exists():
+            mtime = datetime.fromtimestamp(log_file.stat().st_mtime)
+            date_str = mtime.strftime("%Y-%m-%d")
+            date_dir = log_dir / date_str
+            date_dir.mkdir(exist_ok=True)
+            # 找最大索引
+            existing = [f for f in date_dir.iterdir() if f.suffix == '.log' and f.stem.startswith(date_str)]
+            max_idx = -1
+            for f in existing:
+                parts = f.stem.split('-')
+                if len(parts) >= 2:
+                    try:
+                        idx = int(parts[-1])
+                        if idx > max_idx:
+                            max_idx = idx
+                    except:
+                        pass
+            next_idx = max_idx + 1
+            archived_name = f"{date_str}-{next_idx:04d}"
+            archived_name += (f"-{roll_name}" if roll_name else "") + ".log"
+            archived_path = date_dir / archived_name
+            log_file.rename(archived_path)
+            logger.info(f"[Logger] 已归档旧日志: {archived_name}")
+        _log_stream = open(log_file, 'a', encoding='utf-8')
+        _log_stream.write(f"[{local_timestamp()}] === 会话开始 ===\n")
+        _log_stream.flush()
+        logger.info(f"[Logger] 日志写入滚动文件: {log_file}")
     except Exception as e:
         logger.error(f"[Logger] 无法初始化文件日志: {e}")
 

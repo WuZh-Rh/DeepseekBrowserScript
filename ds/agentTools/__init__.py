@@ -5,6 +5,8 @@
 # @Author  : Wu_RH
 # @FileName: __init__.py.py
 
+from ds.config import CONFIG
+
 TOOLS = {}
 
 
@@ -17,7 +19,10 @@ def init_tools():
 # ---- 工具描述和调度 ----
 def get_tool_descriptions():
     lines = []
+    allow_tools = CONFIG.get("allow_tools", [])
     for name, tool in TOOLS.items():
+        if name not in allow_tools:
+            continue
         desc = tool["description"]
         params = tool.get("parameters", {})
         param_lines = []
@@ -30,10 +35,14 @@ def get_tool_descriptions():
 
 
 def execute_tool(name, args):
+    allow_tools = CONFIG.get("allow_tools", [])
+    if allow_tools and name not in allow_tools:
+        available = ", ".join([i for i in TOOLS.keys() if i in allow_tools])
+        raise ValueError(f"未知工具：\"{name}\", 可用工具: {available}")
     tool = TOOLS.get(name)
     if not tool:
-        available = ", ".join(TOOLS.keys())
-        raise ValueError(f"未知工具：\"{name}\"。可用工具：{available}")
+        available = ", ".join([i for i in TOOLS.keys() if i in allow_tools])
+        raise ValueError(f"未知工具: \"{name}\", 可用工具: {available}")
     try:
         return tool["execute"](**args)
     except Exception as e:

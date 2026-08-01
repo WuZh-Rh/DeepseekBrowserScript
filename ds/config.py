@@ -10,9 +10,10 @@ import json
 from pathlib import Path
 
 HOME = Path.home()
+SELF_PATH = Path(os.getcwd())
 DEFAULT_CONFIG = {
     "DEEPSEEK_URL": "https://chat.deepseek.com",
-    "SESSION_DIR": str(HOME / ".deepseek-agent" / "session"),
+    "SESSION_DIR": str(SELF_PATH / "session" / "session"),
     "HEADLESS": False,
     "RESPONSE_TIMEOUT": 180000,      # 毫秒
     "STABLE_DELAY": 2500,            # 毫秒

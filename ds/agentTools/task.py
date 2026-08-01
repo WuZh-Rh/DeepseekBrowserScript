@@ -101,3 +101,20 @@ TOOLS["run_test"] = {
     "parameters": {},
     "execute": tool_run_test,
 }
+
+
+def tool_abort_task(reason, errorCode):
+    from ds.logger import logger
+    logger.info(f"\n🚨 [中止] AI 请求中止任务。原因：{reason}")
+    logger.info(f"以错误码 {errorCode} 退出。")
+    sys.exit(errorCode)
+
+
+TOOLS["abort_task"] = {
+    "description": "强制中止当前任务并以指定的错误码退出代理。当遇到致命错误、无效需求或任何不可恢复的情况时使用；若需正常结束任务，可将错误码设为 0。",
+    "parameters": {
+        "reason": {"type": "string", "required": True, "description": "中止任务的原因"},
+        "errorCode": {"type": "integer", "required": True, "description": "退出时使用的错误码。设置为 0 表示正常退出，非零表示异常退出。"}
+    },
+    "execute": tool_abort_task,
+}

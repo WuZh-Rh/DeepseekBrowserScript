@@ -38,9 +38,13 @@ def parse_args():
     parser.add_argument("--save-log", action="store_true", help="保存会话日志到 ~/.deepseek-agent/logs/")
     parser.add_argument("--calibrate", action="store_true", help="打开浏览器并打印 DOM 信息，帮助修复选择器")
     parser.add_argument("--test-bat", dest="test_bat", help="指定测试脚本（.bat），用于验证最终结果")
-    parser.add_argument("--log-file", dest="log_file", help="指定日志文件路径，直接追加到该文件（不滚动）")
-    parser.add_argument("--log-path", dest="log_path", help="指定日志文件路径", default="./logs")
+    parser.add_argument("--log-path", dest="log_path", help="指定日志目录", default="./logs")
+    parser.add_argument("--log-name", dest="log_name", help="指定日志文件名（如 my.log）", default="latest.log")
+    parser.add_argument("--no-roll", dest="no_roll", action="store_true", help="禁用日志滚动（追加到同一个文件，默认每次运行生成新文件）")
+    parser.add_argument("--roll-name", dest="roll_name", help="滚动日志的时候添加的后缀(YYYY-MM-DD-XXXX-?.log)", default="")
     parser.add_argument("-m", "--max-iterations", type=int, help="限制 Agent 的最大循环轮数（默认 150）")
+    parser.add_argument("-S", "--session-dir", dest="session_dir", help="指定会话目录")
+    parser.add_argument("--deny-tools", nargs='+', help="禁用指定的工具，空格分隔", default=None)
     parser.add_argument("--task-path", help="从文件读取任务内容")
     parser.add_argument("rest", nargs="*", help="任务文本（不带 -t 时）")
     return parser.parse_args()
@@ -48,8 +52,6 @@ def parse_args():
 
 def main():
     args = parse_args()
-
-    # 帮助已自动处理
 
     # 应用选项到配置
     if args.debug:
@@ -62,6 +64,18 @@ def main():
             logger.error(f"工作目录不存在: {resolved}")
             sys.exit(1)
         CONFIG["WORKING_DIR"] = str(resolved)
+    if args.deny_tools:
+        from ds.agentTools import TOOLS
+        CONFIG["allow_tools"] = [
+            tool_name for tool_name in TOOLS.keys()
+            if tool_name not in args.deny_tools
+        ]
+    if args.session_dir:
+        session_dir = Path(args.session_dir).resolve()
+        # 确保目录存在
+        session_dir.mkdir(parents=True, exist_ok=True)
+        CONFIG["SESSION_DIR"] = str(session_dir)
+        logger.info(f"会话目录已指定: {CONFIG['SESSION_DIR']}")
     if args.test_bat:
         CONFIG["TEST_BAT_PATH"] = str(Path(args.test_bat).resolve())
     if args.max_iterations is not None:
@@ -73,18 +87,18 @@ def main():
     # 初始化日志
     if sys.platform == 'win32':
         if os.path.isabs(args.log_path):
-            default_log_dir = args.log_path
+            log_dir = args.log_path
         else:
-            default_log_dir = os.path.join(Path(SELF_PATH), Path(args.log_path))
+            log_dir = os.path.join(Path(SELF_PATH), Path(args.log_path))
     else:
-        default_log_dir = os.path.expanduser("~/.deepseek-agent/logs")
-    if not os.path.exists(default_log_dir):
-        logger.info(f"发现不存在{default_log_dir}, 主动创建")
-        os.makedirs(default_log_dir)
-    if args.log_file:
-        init_log_file(args.log_file, is_fixed=True)
-    else:
-        init_log_file(default_log_dir, is_fixed=False)
+        log_dir = os.path.expanduser("~/.deepseek-agent/logs")
+    log_dir = Path(log_dir)
+    log_dir.mkdir(parents=True, exist_ok=True)
+    log_file_path = str(log_dir / args.log_name)
+
+    # 如果指定了 log_name，使用固定文件模式（is_fixed=True）
+    init_log_file(log_file_path, is_fixed=args.no_roll, roll_name=args.roll_name)
+    logger.info(f"日志文件   : {log_file_path}")
 
     # 确定任务
     task = args.task
@@ -105,17 +119,14 @@ def main():
     logger.info(f"无头模式   : {CONFIG['HEADLESS']}")
     logger.info(f"调试模式   : {CONFIG['DEBUG']}")
     logger.info(f"最大轮数   : {CONFIG['MAX_ITERATIONS']}")
-    if args.log_file:
-        logger.info(f"日志文件   : {args.log_file}")
-    else:
-        logger.info(f"日志目录   : {default_log_dir} ")
+    logger.info(f"日志文件   : {log_file_path}")
     print()
 
     # 创建 Agent
     agent = DeepSeekAgent({
         "save_log": args.save_log,
         "test_bat": args.test_bat,
-        "log_file": args.log_file,
+        "log_file": log_file_path,
     })
 
     # 信号处理

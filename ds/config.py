@@ -18,7 +18,7 @@ DEFAULT_CONFIG = {
     "RESPONSE_TIMEOUT": 180000,      # 毫秒
     "STABLE_DELAY": 2500,            # 毫秒
     "SEND_DELAY": 400,               # 毫秒
-    "MAX_ITERATIONS": 150,
+    "MAX_ITERATIONS": 300,
     "WORKING_DIR": os.getcwd(),
     "MAX_OUTPUT_LENGTH": 8000,
     "DEBUG": False,

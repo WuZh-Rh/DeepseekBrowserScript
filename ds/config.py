@@ -24,7 +24,7 @@ DEFAULT_CONFIG = {
     "DEBUG": False,
     "QQ_API_HOST": "10.147.19.186",  # 请根据实际修改
     "QQ_API_PORT": 3000,
-    "QQ_POLL_TIMEOUT": 180,          # 秒
+    "QQ_POLL_TIMEOUT": 180,          # 分钟
     "QQ_POLL_INTERVAL": 5,           # 秒
     "TEST_BAT_PATH": None,
 }

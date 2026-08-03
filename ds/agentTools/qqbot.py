@@ -358,7 +358,7 @@ def tool_listen_group_msg(
     group_id: str,
     trigger: str = 'any',
     keyword: str = None,
-    timeout: int = 5,
+    timeout: int = None,
     history_limit: int = 5,
     fetch_count: int = 10
 ):
@@ -373,6 +373,8 @@ def tool_listen_group_msg(
     poll_interval = CONFIG["QQ_POLL_INTERVAL"]  # 秒
     bot_qq = _get_bot_qq()
     fetch_count = history_limit if history_limit > fetch_count else fetch_count
+    if timeout is None:
+        timeout = CONFIG.get("QQ_POLL_TIMEOUT")
 
     if trigger == 'keyword' and not keyword:
         return "❌ trigger='keyword' 时必须提供 keyword"
@@ -469,18 +471,26 @@ TOOLS["listen_group_msg"] = {
 
 # 18. send_group_msg
 def tool_send_group_msg(
-    group_id,
-    text,
-    at_user=None,
-    timeout=None,
-    history_limit=10
+    group_id: str,
+    text: str,
+    at_user: str = None,
+    trigger: str = 'any',
+    keyword: str = None,
+    timeout: float = None,
+    history_limit: int = 10,
+    fetch_count: int = 10
 ):
+    """
+    向指定群发送消息，并立即开始监听群消息（复用 listen_group_msg 的逻辑），
+    直到触发条件满足或超时。返回结果与 listen_group_msg 一致。
+    """
+    # 参数检查（与 listen 保持一致）
+    if trigger == 'keyword' and not keyword:
+        return "❌ trigger='keyword' 时必须提供 keyword"
+
+    # 1. 发送消息
     host = CONFIG["QQ_API_HOST"]
     port = CONFIG["QQ_API_PORT"]
-    poll_interval = CONFIG["QQ_POLL_INTERVAL"]  # 秒
-    timeout_sec = (timeout or CONFIG["QQ_POLL_TIMEOUT"]) * 60  # 转秒
-
-    # 1. 构造消息段
     segments = []
     if at_user:
         segments.append({"type": "at", "data": {"qq": at_user}})
@@ -494,96 +504,37 @@ def tool_send_group_msg(
         send_data = send_resp.json()
         if send_data.get('status') != 'ok':
             return f"❌ 发送失败: {send_data}"
-        message_id = send_data.get('data', {}).get('message_id')
-        if not message_id:
-            return "❌ 响应中未包含 message_id"
     except Exception as e:
         return f"❌ 发送消息失败: {e}"
 
-    # 2. 轮询历史消息
-    all_messages = []
-    seen_ids = set()
-    deadline = time.time() + timeout_sec
-    reply_msg = None
-
-    history_url = f"http://{host}:{port}/get_group_msg_history"
-
-    while time.time() < deadline:
-        time.sleep(poll_interval)
-        try:
-            hist_resp = requests.post(
-                history_url,
-                json={"group_id": group_id, "count": 5, "reverseOrder": False},
-                timeout=10
-            )
-            data = hist_resp.json()
-            if data.get('status') != 'ok':
-                continue
-
-            messages = data.get('data', [])
-            if isinstance(messages, dict) and 'messages' in messages:
-                messages = messages['messages']
-            if not isinstance(messages, list):
-                continue
-
-            # 记录新消息
-            for msg in messages:
-                if msg.get('message_id') not in seen_ids:
-                    seen_ids.add(msg.get('message_id'))
-                    all_messages.append(msg)
-
-            # 检查是否有针对我们发送消息的回复
-            for msg in reversed(messages):
-                if msg.get('message_type') != 'group':
-                    continue
-                msg_segments = msg.get('message', [])
-                for seg in msg_segments:
-                    if seg.get('type') == 'reply' and str(seg.get('data', {}).get('id')) == str(message_id):
-                        reply_msg = msg
-                        break
-                if reply_msg:
-                    break
-            if reply_msg:
-                break
-        except Exception:
-            continue
-
-    # 3. 返回结果
-    if reply_msg:
-        formatted = format_message_list(all_messages, history_limit, reply_msg.get('message_id'))
-        count = min(history_limit, len(all_messages))
-        return f"💬 收到回复！以下是最近 {count} 条消息：\n{formatted}"
-    else:
-        if not all_messages:
-            return "⏰ 超时，且未收到任何消息。"
-        formatted = format_message_list(all_messages, history_limit, None)
-        count = min(history_limit, len(all_messages))
-        return f"⏰ 无人回复，超时。以下是最近 {count} 条消息：\n{formatted}"
+    # 2. 调用独立的监听函数
+    return tool_listen_group_msg(
+        group_id=group_id,
+        trigger=trigger,
+        keyword=keyword,
+        timeout=timeout,
+        history_limit=history_limit,
+        fetch_count=fetch_count
+    )
 
 
 TOOLS["send_group_msg"] = {
-    "description": "向指定QQ群发送消息，并等待群友回复（@可选）。若超时无人回复，则返回这段时间内的最近消息列表。",
+    "description": "向指定QQ群发送消息，并监听群消息（触发规则同 listen_group_msg），直到触发条件满足或超时。支持 any/mention/keyword 三种触发方式。",
     "parameters": {
         "group_id": {"type": "string", "required": True, "description": "目标群号"},
         "text": {"type": "string", "required": True, "description": "要发送的文本内容"},
         "at_user": {"type": "string", "required": False, "description": "要@的QQ号（可选）"},
-        "timeout": {"type": "number", "required": False, "description": "等待回复的超时分钟数"},
-        "history_limit": {"type": "number", "required": False, "description": "超时时返回的最大历史消息条数（默认10）"},
+        "trigger": {"type": "string", "required": False, "description": "触发类型：'any'、'mention'、'keyword'，默认'any'"},
+        "keyword": {"type": "string", "required": False, "description": "trigger='keyword' 时必填"},
+        "timeout": {"type": "number", "required": False, "description": "等待触发超时分钟数，默认使用全局配置"},
+        "history_limit": {"type": "number", "required": False, "description": "超时或触发时返回的最大历史消息条数（取最新的N条），默认10"},
+        "fetch_count": {"type": "number", "required": False, "description": "每次轮询拉取的最大条数，默认10"},
     },
     "execute": tool_send_group_msg,
 }
 
-
-if __name__ == "__main__":
-    # ─── 真实监听测试（需要 API 服务运行）───
-    GROUP_ID = "1051027867"
-    print(f"开始监听群 {GROUP_ID}")
-    result = tool_listen_group_msg(
-        group_id=GROUP_ID,
-        trigger='keyword',
-        keyword="1",
-        timeout=0,          # 2分钟，够你发消息了
-        history_limit=100
-    )
-    print("\n监听结果：")
-    print(result)
+if __name__ == '__main__':
+    print(tool_send_group_msg(
+        "1001869807",
+        "1"
+    ))

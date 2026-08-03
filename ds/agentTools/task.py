@@ -32,6 +32,33 @@ def truncate(s, max_len=None):
     return s[:half] + f"\n\n⚠ [输出已截断 — 共 {len(s):,} 字符，仅显示开头和结尾各 {half} 字符]\n\n" + s[-half:]
 
 
+def _kill_process_tree(process, pid):
+    """强杀进程树（平台相关）"""
+    if process.poll() is not None:
+        return  # 已结束
+
+    if sys.platform == "win32":
+        # Windows: 使用 taskkill /F /T 强制终结整个进程树
+        try:
+            subprocess.run(
+                ["taskkill", "/F", "/T", "/PID", str(pid)],
+                capture_output=True,
+                timeout=2
+            )
+        except Exception:
+            # 备用方案：直接用 process.kill()
+            process.kill()
+    else:
+        # Unix: 发送 SIGKILL 到整个进程组
+        try:
+            os.killpg(os.getpgid(pid), signal.SIGKILL)
+        except ProcessLookupError:
+            pass  # 进程已退出
+        except Exception:
+            # 如果进程组无效，降级为单独 kill
+            process.kill()
+
+
 # 11. run_command
 def tool_run_command(command, cwd=None, timeout=60, env=None):
     work_dir = resolve_path(cwd) if cwd else CONFIG["WORKING_DIR"]
@@ -39,42 +66,52 @@ def tool_run_command(command, cwd=None, timeout=60, env=None):
     process = None
     timed_out = threading.Event()
 
-    def kill_process():
-        """超时后终止进程（先优雅后强制）"""
+    def force_kill():
+        """超时强杀回调"""
         timed_out.set()
         if process and process.poll() is None:
-            process.terminate()
-            # 给进程一点时间处理终止信号
-            time.sleep(0.2)
-            if process.poll() is None:
-                process.kill()
+            _kill_process_tree(process, process.pid)
 
     try:
-        # 启动进程
-        process = subprocess.Popen(
-            command,
-            shell=True,
-            cwd=work_dir,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            text=True,
-            env=env_vars,
-        )
+        # 创建进程组（Unix: start_new_session, Windows: CREATE_NEW_PROCESS_GROUP）
+        if sys.platform == "win32":
+            creation_flags = subprocess.CREATE_NEW_PROCESS_GROUP
+            process = subprocess.Popen(
+                command,
+                shell=True,
+                cwd=work_dir,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+                env=env_vars,
+                creationflags=creation_flags,
+            )
+        else:
+            process = subprocess.Popen(
+                command,
+                shell=True,
+                cwd=work_dir,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+                env=env_vars,
+                start_new_session=True,   # 创建新会话，便于 killpg
+            )
 
-        # 启动超时定时器
-        timer = threading.Timer(timeout, kill_process)
-        timer.daemon = True  # 避免主线程退出时阻塞
+        # 启动超时定时器（直接强杀，不留情面）
+        timer = threading.Timer(timeout, force_kill)
+        timer.daemon = True
         timer.start()
 
-        # 等待进程结束并获取输出
+        # 等待进程结束
         stdout, stderr = process.communicate()
-        timer.cancel()  # 若正常结束则取消定时器
+        timer.cancel()
 
-        # 检查是否因超时而终止
-        output = stdout + stderr
+        # 若因超时而强杀，抛出异常
         if timed_out.is_set():
-            raise RuntimeError(f"命令执行超时（{timeout} 秒）：\n{truncate(output or '无输出')}")
+            raise RuntimeError(f"命令执行超时（{timeout} 秒），已被强制终止")
 
+        output = stdout + stderr
         if process.returncode != 0:
             raise RuntimeError(
                 f"命令执行失败（退出码 {process.returncode}）：\n{truncate(output or '无输出')}"
@@ -85,9 +122,9 @@ def tool_run_command(command, cwd=None, timeout=60, env=None):
         raise RuntimeError(f"命令执行错误: {e}")
 
     finally:
-        # 确保进程被清理（若因异常退出而未被终止）
+        # 确保进程被清理（若因异常未终止）
         if process and process.poll() is None:
-            process.kill()
+            _kill_process_tree(process, process.pid)
 
 
 TOOLS["run_command"] = {

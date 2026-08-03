@@ -7,6 +7,8 @@
 import os
 import subprocess
 import sys
+import threading
+import time
 from pathlib import Path
 
 from ds.agentTools import TOOLS
@@ -34,24 +36,58 @@ def truncate(s, max_len=None):
 def tool_run_command(command, cwd=None, timeout=60, env=None):
     work_dir = resolve_path(cwd) if cwd else CONFIG["WORKING_DIR"]
     env_vars = {**os.environ, **(env or {})}
+    process = None
+    timed_out = threading.Event()
+
+    def kill_process():
+        """超时后终止进程（先优雅后强制）"""
+        timed_out.set()
+        if process and process.poll() is None:
+            process.terminate()
+            # 给进程一点时间处理终止信号
+            time.sleep(0.2)
+            if process.poll() is None:
+                process.kill()
+
     try:
-        result = subprocess.run(
+        # 启动进程
+        process = subprocess.Popen(
             command,
             shell=True,
             cwd=work_dir,
-            capture_output=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
             text=True,
-            timeout=timeout,
             env=env_vars,
         )
-        output = result.stdout + result.stderr
-        if result.returncode != 0:
-            raise RuntimeError(f"命令执行失败（退出码 {result.returncode}）：\n{truncate(output or '无输出')}")
+
+        # 启动超时定时器
+        timer = threading.Timer(timeout, kill_process)
+        timer.daemon = True  # 避免主线程退出时阻塞
+        timer.start()
+
+        # 等待进程结束并获取输出
+        stdout, stderr = process.communicate()
+        timer.cancel()  # 若正常结束则取消定时器
+
+        # 检查是否因超时而终止
+        output = stdout + stderr
+        if timed_out.is_set():
+            raise RuntimeError(f"命令执行超时（{timeout} 秒）：\n{truncate(output or '无输出')}")
+
+        if process.returncode != 0:
+            raise RuntimeError(
+                f"命令执行失败（退出码 {process.returncode}）：\n{truncate(output or '无输出')}"
+            )
         return truncate(output.strip() or "(命令执行成功，无输出)")
-    except subprocess.TimeoutExpired:
-        raise RuntimeError(f"命令执行超时（{timeout} 秒）")
+
     except Exception as e:
         raise RuntimeError(f"命令执行错误: {e}")
+
+    finally:
+        # 确保进程被清理（若因异常退出而未被终止）
+        if process and process.poll() is None:
+            process.kill()
 
 
 TOOLS["run_command"] = {

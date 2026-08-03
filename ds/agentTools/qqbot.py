@@ -360,7 +360,8 @@ def tool_listen_group_msg(
     keyword: str = None,
     timeout: int = None,
     history_limit: int = 5,
-    fetch_count: int = 10
+    fetch_count: int = 10,
+    trigger_count: int = 1,
 ):
     """
     监听群消息，阻塞直到触发条件满足或超时，返回最新的 history_limit 条消息。
@@ -375,6 +376,8 @@ def tool_listen_group_msg(
     fetch_count = history_limit if history_limit > fetch_count else fetch_count
     if timeout is None:
         timeout = CONFIG.get("QQ_POLL_TIMEOUT")
+    if trigger_count < 1:
+        return "❌ trigger_count 必须大于等于 1"
 
     if trigger == 'keyword' and not keyword:
         return "❌ trigger='keyword' 时必须提供 keyword"
@@ -419,6 +422,7 @@ def tool_listen_group_msg(
     start_time = time.time()
     timeout_sec = timeout * 60
     seen_ids = set()
+    hit_count = 0  # 累计命中计数器
 
     # 首次拉取，初始化已读
     initial_msgs = fetch_messages(fetch_count)
@@ -438,13 +442,15 @@ def tool_listen_group_msg(
             seen_ids.add(msg_id)
 
             if is_triggered(msg):
-                # 触发：直接拉取最新的 history_limit 条消息返回
-                result_msgs = fetch_messages(history_limit)
-                if result_msgs:
-                    formatted = format_message_list(result_msgs, len(result_msgs), None)
-                    return f"📨 触发条件满足！最新的 {len(result_msgs)} 条消息：\n{formatted}"
-                else:
-                    return "📨 触发条件满足，但拉取消息失败。"
+                hit_count += 1
+                # 一旦达到指定次数，立即触发返回
+                if hit_count >= trigger_count:
+                    result_msgs = fetch_messages(history_limit)
+                    if result_msgs:
+                        formatted = format_message_list(result_msgs, len(result_msgs), None)
+                        return f"📨 触发条件满足（累计 {trigger_count} 次）！最新的 {len(result_msgs)} 条消息：\n{formatted}"
+                    else:
+                        return f"📨 触发条件满足（累计 {trigger_count} 次），但拉取消息失败。"
 
     # 超时
     result_msgs = fetch_messages(history_limit)
@@ -456,7 +462,7 @@ def tool_listen_group_msg(
 
 
 TOOLS["listen_group_msg"] = {
-    "description": "监听群消息，触发时返回累积新消息的末尾 history_limit 条（格式化文本）。每次轮询最多拉取 fetch_count 条。",
+    "description": "监听群消息，触发时返回累积新消息的末尾 history_limit 条（格式化文本）。支持设置触发所需累计次数（trigger_count）。",
     "parameters": {
         "group_id": {"type": "string", "required": True, "description": "群号"},
         "trigger": {"type": "string", "required": False, "description": "触发类型：'any'、'mention'、'keyword'，默认'any'"},
@@ -464,6 +470,7 @@ TOOLS["listen_group_msg"] = {
         "timeout": {"type": "number", "required": False, "description": "监听超时时间，单位分钟，默认5"},
         "history_limit": {"type": "number", "required": False, "description": "返回消息条数上限（取最新的 N 条），默认5"},
         "fetch_count": {"type": "number", "required": False, "description": "每次轮询拉取的最大条数，默认50"},
+        "trigger_count": {"type": "number", "required": False, "description": "触发所需累计次数，默认1（例如设置3代表需累计3次触发才生效）"},
     },
     "execute": tool_listen_group_msg,
 }
@@ -478,7 +485,8 @@ def tool_send_group_msg(
     keyword: str = None,
     timeout: float = None,
     history_limit: int = 10,
-    fetch_count: int = 10
+    fetch_count: int = 10,
+    trigger_count: int = 1,
 ):
     """
     向指定群发送消息，并立即开始监听群消息（复用 listen_group_msg 的逻辑），
@@ -514,7 +522,8 @@ def tool_send_group_msg(
         keyword=keyword,
         timeout=timeout,
         history_limit=history_limit,
-        fetch_count=fetch_count
+        fetch_count=fetch_count,
+        trigger_count=trigger_count,
     )
 
 
@@ -529,6 +538,7 @@ TOOLS["send_group_msg"] = {
         "timeout": {"type": "number", "required": False, "description": "等待触发超时分钟数，默认使用全局配置"},
         "history_limit": {"type": "number", "required": False, "description": "超时或触发时返回的最大历史消息条数（取最新的N条），默认10"},
         "fetch_count": {"type": "number", "required": False, "description": "每次轮询拉取的最大条数，默认10"},
+        "trigger_count": {"type": "number", "required": False, "description": "触发所需累计次数，默认1（例如设置3代表需累计3次触发才生效）"},
     },
     "execute": tool_send_group_msg,
 }
@@ -536,5 +546,6 @@ TOOLS["send_group_msg"] = {
 if __name__ == '__main__':
     print(tool_send_group_msg(
         "1001869807",
-        "1"
+        "1",
+        trigger_count=3
     ))

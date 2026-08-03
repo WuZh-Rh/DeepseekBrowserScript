@@ -70,6 +70,12 @@ def main():
             tool_name for tool_name in TOOLS.keys()
             if tool_name not in args.deny_tools
         ]
+    else:
+        from ds.agentTools import TOOLS
+        CONFIG["allow_tools"] = [
+            tool_name for tool_name in TOOLS.keys()
+        ]
+
     if args.session_dir:
         session_dir = Path(args.session_dir).resolve()
         # 确保目录存在

@@ -462,7 +462,10 @@ def tool_listen_group_msg(
 
 
 TOOLS["listen_group_msg"] = {
-    "description": "监听群消息，触发时返回累积新消息的末尾 history_limit 条（格式化文本）。支持设置触发所需累计次数（trigger_count）。",
+    "description": "监听群消息，触发时返回累积新消息的末尾 history_limit 条（格式化文本）"
+                   "支持设置触发所需累计次数（trigger_count）。"
+                   "trigger: any:任何人发任何消息均会触发, mention:只有当用户@你的时候才会触发, keyword:只有触发指定关键词才会触发"
+                   "注释: 若传入any作为trigger 推荐trigger_count接近history_limit 否则会遗漏你期望获得的回复",
     "parameters": {
         "group_id": {"type": "string", "required": True, "description": "群号"},
         "trigger": {"type": "string", "required": False, "description": "触发类型：'any'、'mention'、'keyword'，默认'any'"},

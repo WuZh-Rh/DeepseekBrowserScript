@@ -46,6 +46,7 @@ def parse_args():
     parser.add_argument("-S", "--session-dir", dest="session_dir", help="指定会话目录")
     parser.add_argument("--deny-tools", nargs='+', help="禁用指定的工具，空格分隔", default=None)
     parser.add_argument("--task-path", help="从文件读取任务内容")
+    parser.add_argument("--load-file", help="上传/加载指定文件")
     parser.add_argument("rest", nargs="*", help="任务文本（不带 -t 时）")
     return parser.parse_args()
 
@@ -174,6 +175,8 @@ def main():
         if args.interactive:
             agent.run_interactive()
         else:
+            if args.load_file:
+                agent.browser.load_file(args.load_file)
             result = agent.run(task)
             if not result.get("completed", False):
                 logger.error("任务失败，未能完成。")

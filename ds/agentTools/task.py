@@ -5,6 +5,7 @@
 # @Author  : Wu_RH
 # @FileName: task.py
 import os
+import signal
 import subprocess
 import sys
 import threading

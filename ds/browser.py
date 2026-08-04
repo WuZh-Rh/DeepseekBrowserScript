@@ -596,3 +596,56 @@ class DeepSeekBrowser:
                     'args': parsed.get('args'),
                 })
         return results
+
+    def load_file(self, file_paths, selector=None):
+        """
+        模拟通过文件输入框上传文件（相当于点击“选择文件”对话框）。
+        不依赖操作系统拖拽API，仅通过Web的 <input type="file"> 元素实现。
+
+        :param file_paths: 文件路径，可以是字符串（单个）或列表（多个）
+        :param selector: 可选，指定文件输入框的CSS选择器。
+                         如果不提供，将自动尝试常见的选择器。
+        :raises RuntimeError: 如果找不到文件输入元素
+        """
+        # 统一转换为字符串列表
+        if isinstance(file_paths, (str, Path)):
+            file_paths = [str(file_paths)]
+        else:
+            file_paths = [str(p) for p in file_paths]
+
+        # 定位文件输入框
+        if selector is None:
+            # 常见选择器清单
+            candidates = [
+                'input[type="file"]',
+                '[class*="file-input"]',
+                '[class*="upload"]',
+                '[data-testid="file-upload"]',
+                '[role="button"][aria-label*="upload" i] + input[type="file"]',  # 有些按钮后面跟隐藏input
+            ]
+            found_sel = None
+            for sel in candidates:
+                try:
+                    el = self.page.query_selector(sel)
+                    if el and el.is_visible():
+                        found_sel = sel
+                        break
+                except:
+                    pass
+            if found_sel is None:
+                # 尝试查找所有隐藏的file input（很多场景下它是display:none）
+                all_inputs = self.page.query_selector_all('input[type="file"]')
+                if all_inputs:
+                    found_sel = 'input[type="file"]'
+                else:
+                    raise RuntimeError(
+                        "未找到文件上传输入框，请手动提供 selector 参数。"
+                        "你可以使用浏览器开发者工具找到对应的 input[type='file'] 选择器。"
+                    )
+            selector = found_sel
+
+        # 设置文件（Playwright会自动触发 change 事件）
+        self.page.set_input_files(selector, file_paths)
+        logger.info(f"已上传文件: {', '.join(file_paths)}")
+        # 可选的延迟，让页面处理上传
+        time.sleep(0.5)

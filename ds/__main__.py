@@ -36,7 +36,6 @@ def parse_args():
     parser.add_argument("--debug", action="store_true", help="输出详细的调试信息")
     parser.add_argument("--headless", action="store_true", help="无头模式运行浏览器")
     parser.add_argument("--save-log", action="store_true", help="保存会话日志到 ~/.deepseek-agent/logs/")
-    parser.add_argument("--calibrate", action="store_true", help="打开浏览器并打印 DOM 信息，帮助修复选择器")
     parser.add_argument("--test-bat", dest="test_bat", help="指定测试脚本（.bat），用于验证最终结果")
     parser.add_argument("--log-path", dest="log_path", help="指定日志目录", default="./logs")
     parser.add_argument("--log-name", dest="log_name", help="指定日志文件名（如 my.log）", default="latest.log")
@@ -147,15 +146,6 @@ def main():
 
     signal.signal(signal.SIGINT, lambda s, f: shutdown(0))
     signal.signal(signal.SIGTERM, lambda s, f: shutdown(0))
-
-    # 校准模式
-    if args.calibrate:
-        logger.header("校准模式 — 读取 DOM 选择器")
-        agent.init()
-        agent.browser.dump_debug_info()
-        agent.browser.screenshot()
-        logger.info("完成。如需更新选择器，请查看上面的输出。")
-        shutdown(0)
 
     # 无任务则进入交互
     if not args.interactive and not task:

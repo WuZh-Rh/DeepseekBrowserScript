@@ -387,47 +387,6 @@ class DeepSeekBrowser:
         text = re.sub(r'\n{3,}', '\n\n', text)
         return text.strip()
 
-    # 调试和校准
-    def dump_debug_info(self):
-        info = self.page.evaluate("""
-            () => {
-                const classFreq = {};
-                document.querySelectorAll('*').forEach(el => {
-                    el.classList.forEach(c => {
-                        if (c.match(/message|chat|input|send|stop|markdown|content|assistant|user|bot/i)) {
-                            classFreq[c] = (classFreq[c] || 0) + 1;
-                        }
-                    });
-                });
-                const inputs = Array.from(document.querySelectorAll('textarea, [contenteditable]')).map(e => ({
-                    tag: e.tagName,
-                    id: e.id || null,
-                    class: e.className?.slice(0, 80) || null,
-                    placeholder: e.placeholder || null,
-                    editable: e.isContentEditable,
-                    visible: e.offsetParent !== null,
-                }));
-                return {
-                    url: window.location.href,
-                    title: document.title,
-                    classes: Object.entries(classFreq).sort((a,b) => b[1]-a[1]).slice(0,40),
-                    inputs: inputs,
-                };
-            }
-        """)
-        print('\n' + '═'*60)
-        print("  DOM 调试信息")
-        print('═'*60)
-        print(f"URL   : {info['url']}")
-        print(f"标题 : {info['title']}")
-        print("\n输入元素:")
-        for i in info['inputs']:
-            print(" ", i)
-        print("\n匹配的 CSS 类（按频率）:")
-        for cls, count in info['classes']:
-            print(f"  {str(count).rjust(3)}x  .{cls}")
-        print('═'*60 + '\n')
-
     def screenshot(self, file_path="/tmp/deepseek-agent-debug.png"):
         self.page.screenshot(path=file_path, full_page=False)
         logger.info(f"截屏已保存: {file_path}")

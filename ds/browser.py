@@ -208,6 +208,9 @@ class DeepSeekBrowser:
         initial_count = self._get_message_count()
         appeared = False
         while time.time() - start < 12:
+            prompts = self._get_prompt_texts()
+            if "达到对话长度上限，请开启新对话" in prompts:
+                raise RuntimeError("对话达到长度限制")
             if self._get_message_count() > initial_count:
                 appeared = True
                 break
@@ -231,7 +234,7 @@ class DeepSeekBrowser:
                         break
                     stable_start = None
             # 进度
-            dot = '.' * ((int(time.time()) % 4))
+            dot = '.' * (int(time.time()) % 4)
             logger.thinking(f"正在接收响应{dot}  ({len(text)} 字符)")
             time.sleep(0.5)
 
@@ -386,6 +389,63 @@ class DeepSeekBrowser:
         # 压缩空行
         text = re.sub(r'\n{3,}', '\n\n', text)
         return text.strip()
+
+    def _get_prompt_texts(self):
+        """
+        从页面上提取所有可能的提示框文本（如“达到对话长度上限，请开启新对话”）。
+        基于稳定的 .ds-flex 类定位，排除助手消息内部的按钮组。
+        返回所有匹配文本的列表。
+        """
+        try:
+            texts = self.page.evaluate("""
+                () => {
+                    const results = [];
+
+                    document.querySelectorAll('.ds-flex').forEach(flex => {
+                        const parent = flex.parentElement;
+                        if (!parent) return;
+
+                        // 跳过位于 .ds-message 内部的按钮（助手消息中的操作按钮）
+                        if (parent.closest && parent.closest('.ds-message')) {
+                            return;
+                        }
+
+                        const siblings = [parent.previousElementSibling, parent.nextElementSibling];
+                        for (const sib of siblings) {
+                            if (!sib) continue;
+                            const span = sib.querySelector('span');
+                            if (span) {
+                                const text = span.textContent.trim();
+                                if (text.length > 0) {
+                                    results.push(text);
+                                }
+                            }
+                        }
+
+                        const spanInParent = parent.querySelector('span');
+                        if (spanInParent) {
+                            const text = spanInParent.textContent.trim();
+                            if (text.length > 0) {
+                                results.push(text);
+                            }
+                        }
+                    });
+
+                    // 如果没找到，再试一个更宽松的 fallback（只用于调试）
+                    if (results.length === 0) {
+                        const fallback = document.querySelector('span:has-text("开启新对话")');
+                        if (fallback) {
+                            const text = fallback.textContent.trim();
+                            if (text.length > 0) results.push(text);
+                        }
+                    }
+
+                    return results;  // 返回数组
+                }
+            """)
+            return texts if texts else []
+        except Exception:
+            return []
 
     def open_sidebar(self):
         """确保侧边栏展开。如果侧边栏已打开则忽略，否则点击汉堡菜单按钮。"""

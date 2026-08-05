@@ -112,7 +112,10 @@ class DeepSeekAgent:
         for iter_num in range(1, max_iter + 1):
             logger.iteration(iter_num, max_iter)
 
-            raw_response = self.browser.wait_for_response()
+            try:
+                raw_response = self.browser.wait_for_response()
+            except Exception as e:
+                return {"content": str(e), "completed": False}
             if not raw_response or not raw_response.strip():
                 logger.warn("收到空响应 — 正在重试...")
                 self.browser.send_message("请继续。如果你在等待输入，请做出最佳判断后继续。")

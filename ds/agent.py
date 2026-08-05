@@ -120,7 +120,7 @@ class DeepSeekAgent:
 
             if CONFIG["DEBUG"]:
                 logger.dim(f"--- 原始响应（{len(raw_response)} 字符）---")
-                logger.dim(raw_response)
+                logger.dim(raw_response[:400])
 
             self.conversation.add_assistant_message(raw_response)
 

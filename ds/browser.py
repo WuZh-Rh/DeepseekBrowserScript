@@ -387,10 +387,6 @@ class DeepSeekBrowser:
         text = re.sub(r'\n{3,}', '\n\n', text)
         return text.strip()
 
-    def screenshot(self, file_path="/tmp/deepseek-agent-debug.png"):
-        self.page.screenshot(path=file_path, full_page=False)
-        logger.info(f"截屏已保存: {file_path}")
-
     def open_sidebar(self):
         """确保侧边栏展开。如果侧边栏已打开则忽略，否则点击汉堡菜单按钮。"""
         # 先检查侧边栏是否已可见（通过历史列表容器是否存在且可见）

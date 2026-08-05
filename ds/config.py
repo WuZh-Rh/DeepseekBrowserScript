@@ -10,7 +10,8 @@ import json
 from pathlib import Path
 
 HOME = Path.home()
-SELF_PATH = Path(os.getcwd())
+SELF_PATH = Path(os.path.abspath(__file__)).parent.parent
+
 DEFAULT_CONFIG = {
     "DEEPSEEK_URL": "https://chat.deepseek.com",
     "SESSION_DIR": str(SELF_PATH / "session" / "session"),

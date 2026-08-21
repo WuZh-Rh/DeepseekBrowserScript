@@ -14,7 +14,6 @@ from .config import CONFIG
 from .logger import logger
 from .browser import DeepSeekBrowser
 from ds.agentTools import execute_tool
-from .parser import parse_response
 from .prompt import ConversationManager
 
 
@@ -127,47 +126,61 @@ class DeepSeekAgent:
 
             self.conversation.add_assistant_message(raw_response)
 
-            parsed = parse_response(raw_response)
+            parsed = self.browser.get_latest_tool_calls()
 
             if parsed["type"] == "tool_call":
-                name = parsed["name"]
-                args = parsed["args"]
-                logger.tool_call(name, args)
+                feedback = ""
+                for tool in parsed["tools"]:
+                    name = tool["name"]
+                    args = tool["args"]
+                    logger.tool_call(name, args)
+                    result_success = True
 
-                # 连续测试检查
-                if name == "run_test":
-                    if test_failed and not other_tool_called_after_test:
-                        warning = self.conversation.add_tool_result(
-                            "SYSTEM",
-                            "⚠️ 测试已失败过了，你尚未调用任何其他工具来修复问题。请先使用其他工具修复代码。",
-                            True
-                        )
-                        self.browser.send_message(warning)
-                        continue
+                    # 连续测试检查
+                    if name == "run_test":
+                        if test_failed and not other_tool_called_after_test:
+                            warning = self.conversation.add_tool_result(
+                                "SYSTEM",
+                                "⚠️ 测试已失败过了，你尚未调用任何其他工具来修复问题。请先使用其他工具修复代码。",
+                                True
+                            )
+                            self.browser.send_message(warning)
+                            feedback = None
+                            break
 
-                try:
-                    result = execute_tool(name, args)
-                    if result is None and name == "run_test":
-                        return {"content": "", "completed": True}
-                    logger.tool_result(result)
-                    is_error = False
-                except Exception as e:
-                    result = f"错误: {e}"
-                    is_error = True
-                    logger.tool_result(result, True)
+                    try:
+                        tool_result = execute_tool(name, args)
+                        if type(tool_result) is str:
+                            result = tool_result
+                        else:
+                            result = tool_result["data"]
+                            result_success = tool_result["success"]
+                        result: str
+                        if result is None and name == "run_test":
+                            return {"content": "", "completed": True}
+                        logger.tool_result(result)
+                        is_error = False
+                    except Exception as e:
+                        result = f"错误: {e}"
+                        is_error = True
+                        logger.tool_result(result, True)
 
-                # 更新状态
-                if name == "run_test":
-                    if result and result.startswith("测试失败"):
-                        test_failed = True
-                        other_tool_called_after_test = False
+                    # 更新状态
+                    if name == "run_test":
+                        if result and result.startswith("测试失败"):
+                            test_failed = True
+                            other_tool_called_after_test = False
+                        else:
+                            test_failed = False
+                            other_tool_called_after_test = False
                     else:
-                        test_failed = False
-                        other_tool_called_after_test = False
-                else:
-                    other_tool_called_after_test = True
+                        other_tool_called_after_test = True
 
-                feedback = self.conversation.add_tool_result(name, result, is_error)
+                    feedback += self.conversation.add_tool_result(name, result, is_error)
+                    if is_error or (not result_success):
+                        break
+                if feedback is None:
+                    continue
                 self.browser.send_message(feedback)
                 self.done_test = False
                 continue
@@ -188,7 +201,6 @@ class DeepSeekAgent:
                     "SYSTEM",
                     "❌ 你未调用任何tools，但这不符合工作流程。\n\n"
                     "你必须通过调用工具来完成任务。如果需要退出则直接调用run_test\n"
-                    "禁止直接以文本形式给出最终答案，所有工作都必须通过工具完成。\n\n"
                     "请立即调用合适的工具继续工作。",
                     True
                 )

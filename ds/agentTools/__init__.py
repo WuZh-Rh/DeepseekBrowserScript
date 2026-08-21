@@ -35,7 +35,7 @@ def get_tool_descriptions():
     return "\n\n".join(lines)
 
 
-def execute_tool(name, args):
+def execute_tool(name, args) -> dict[str, str]:
     allow_tools = CONFIG.get("allow_tools", [])
     if allow_tools and name not in allow_tools:
         available = ", ".join([i for i in TOOLS.keys() if i in allow_tools])

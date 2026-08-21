@@ -5,8 +5,10 @@
 # @Author  : Wu_RH
 # @FileName: browser.py
 # src/browser.py
-
+import json
 import time
+import traceback
+
 from playwright.sync_api import sync_playwright
 from pathlib import Path
 from .config import CONFIG
@@ -584,34 +586,93 @@ class DeepSeekBrowser:
 
     # ----- 获取工具调用记录（纯 Python 解析） -----
     def get_tool_calls_history(self):
-        """获取当前页面所有助手消息中的工具调用记录"""
-        from .parser import parse_response
+        """
+        从页面中所有助手消息的 DOM 中提取工具调用 JSON。
+        返回扁平列表，每个元素为 {'name': str, 'args': dict}。
+        """
+        all_tools = []
+        try:
+            selector = '.ds-assistant-message-main-content'
+            elements = self.page.query_selector_all(selector)
+            for el in elements:
+                pre = el.query_selector('.md-code-block pre')
+                if not pre:
+                    continue
+                json_text = pre.inner_text().strip()
+                try:
+                    data = json.loads(json_text)
+                except json.JSONDecodeError:
+                    continue  # 跳过非 JSON 块
 
-        # 获取所有助手消息文本
-        messages = self.page.evaluate("""
-            () => {
-                const selectors = ['.ds-assistant-message-main-content', '[data-role="assistant"]'];
-                let msgs = [];
-                for (const sel of selectors) {
-                    const els = document.querySelectorAll(sel);
-                    if (els.length) {
-                        msgs = Array.from(els);
-                        break;
-                    }
-                }
-                return msgs.map(el => el.innerText || el.textContent || '');
-            }
-        """)
+                tools = []
+                if isinstance(data, list):
+                    for item in data:
+                        if 'name' in item and isinstance(item['name'], str):
+                            tools.append({'name': item['name'], 'args': item.get('args', {})})
+                elif isinstance(data, dict):
+                    if 'tools' in data and isinstance(data['tools'], list):
+                        for item in data['tools']:
+                            if 'name' in item and isinstance(item['name'], str):
+                                tools.append({'name': item['name'], 'args': item.get('args', {})})
+                    else:
+                        name = data.get('name')
+                        if name and isinstance(name, str):
+                            tools.append({'name': name, 'args': data.get('args', {})})
+                all_tools.append(tools)
+        except Exception:
+            pass
+        return all_tools
 
-        results = []
-        for msg in messages:
-            parsed = parse_response(msg)
-            if parsed and parsed.get('type') == 'tool_call':
-                results.append({
-                    'tool_name': parsed.get('name'),
-                    'args': parsed.get('args'),
-                })
-        return results
+    def get_latest_tool_calls(self):
+        """
+        从最后一条助手消息 DOM 提取工具调用。
+        返回统一结构：
+            {"type": "tool_calls", "tools": [...]}
+            {"type": "final", "content": "文本内容"}
+            {"type": "error", "message": "错误信息"}
+        """
+        try:
+            selector = '.ds-assistant-message-main-content'
+            elements = self.page.query_selector_all(selector)
+            if not elements:
+                return {"type": "final", "content": ""}
+
+            last_el = elements[-1]
+            # 先拿完整文本（给 final 用）
+            full_text = last_el.inner_text().strip()
+
+            # 尝试拿工具调用
+            pre = last_el.query_selector('.md-code-block pre')
+            if not pre:
+                return {"type": "final", "content": full_text}
+
+            json_text = pre.inner_text().strip()
+            data = json.loads(json_text)
+
+            tools = []
+            if isinstance(data, list):
+                for item in data:
+                    if 'name' in item:
+                        tools.append({'name': item['name'], 'args': item.get('args', {})})
+            elif isinstance(data, dict):
+                if 'tools' in data:
+                    for item in data['tools']:
+                        if 'name' in item:
+                            tools.append({'name': item['name'], 'args': item.get('args', {})})
+                else:
+                    name = data.get('name')
+                    if name:
+                        tools.append({'name': name, 'args': data.get('args', {})})
+
+            if tools:
+                return {"type": "tool_call", "tools": tools}
+            else:
+                return {"type": "final", "content": full_text}
+
+        except json.JSONDecodeError as e:
+            return {"type": "error", "message": f"JSON解析失败: " + traceback.format_exc()}
+        except Exception as e:
+            return {"type": "error", "message": f"提取工具调用失败: " + traceback.format_exc()}
 
     def load_file(self, file_paths, selector=None):
         """

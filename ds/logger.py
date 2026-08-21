@@ -213,7 +213,7 @@ class Logger:
         write_to_file("TOOL_CALL: " + remove_colors(name) + " " + str(args))
 
     @staticmethod
-    def tool_result(result, is_error=False):
+    def tool_result(result: str, is_error=False):
         icon = c('lred', '  ✗ 结果:') if is_error else c('lgreen', '  ✓ 结果:')
         color = 'lred' if is_error else 'gray'
         print(icon)

@@ -60,15 +60,15 @@ def tool_browser_get_page_info():
     return json.dumps(_get_client().get_page_info(), ensure_ascii=False)
 
 
-def tool_browser_execute_js(js_code, save_as=None, timeout=30):
-    result = _get_client().execute_js(js_code, timeout)
+def tool_browser_execute_js(js_code, save_as=None, timeout=30, args=None):
+    result = _get_client().execute_js(js_code, timeout, args)
     if save_as:
         _get_client().save_js(save_as, js_code)
     return result
 
 
-def tool_browser_run_saved_js(name, timeout=30):
-    return _get_client().run_saved_js(name, timeout)
+def tool_browser_run_saved_js(name, timeout=30, args=None):
+    return _get_client().run_saved_js(name, timeout, args)
 
 
 def tool_browser_clear_session():
@@ -89,11 +89,12 @@ TOOLS["browser_navigate"] = {
 }
 
 TOOLS["browser_execute_js"] = {
-    "description": "在浏览器中执行自定义 JavaScript 代码，并返回结果。可保存为可复用脚本。",
+    "description": "在浏览器中执行自定义 JavaScript 代码，并返回结果。可保存为可复用脚本。(使用playwright的Page.evaluate实现)",
     "parameters": {
         "js_code": {"type": "string", "required": True, "description": "要执行的 JavaScript 代码"},
         "save_as": {"type": "string", "required": False, "description": "可选，保存此脚本的名称"},
         "timeout": {"type": "number", "required": False, "description": "超时时间（秒），默认 30"},
+        "args": {"type": "object", "required": False, "description": "传递给 JS 代码的参数对象，可在 JS 中通过 arguments[0] 或函数形参获取"},
     },
     "execute": tool_browser_execute_js,
 }
@@ -124,6 +125,8 @@ TOOLS["browser_run_saved_js"] = {
     "description": "运行之前保存的 JavaScript 代码（按名称调用）。",
     "parameters": {
         "name": {"type": "string", "required": True, "description": "保存时的名称"},
+        "timeout": {"type": "number", "required": False, "description": "超时时间（秒），默认 30"},
+        "args": {"type": "object", "required": False, "description": "传递给 JS 代码的参数对象，可在 JS 中通过 arguments[0] 获取"},
     },
     "execute": tool_browser_run_saved_js,
 }

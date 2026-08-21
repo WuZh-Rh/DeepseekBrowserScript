@@ -17,12 +17,14 @@ from pathlib import Path
 
 # 修复 asyncio 问题（服务内部不受主进程影响，但仍做清除）
 import asyncio
+from typing import Optional
+
 try:
     asyncio.set_event_loop(None)
 except RuntimeError:
     pass
 
-from playwright.sync_api import sync_playwright
+from playwright.sync_api import sync_playwright, Page
 
 from ds.config import CONFIG
 from ds.logger import logger
@@ -36,7 +38,7 @@ class BrowserService:
         self.result_queue = result_queue
         self.playwright = None
         self.context = None
-        self.page = None
+        self.page: Optional[Page] = None
         self.browser = None
         self._initialized = False
         self._custom_js = {}
@@ -136,7 +138,7 @@ class BrowserService:
         self._launch()
         return self.page.content()
 
-    def _cmd_execute_js(self, js_code, timeout=30):
+    def _cmd_execute_js(self, js_code, timeout=30, args=None):
         self._launch()
         timer = None
         timed_out = False
@@ -150,7 +152,9 @@ class BrowserService:
             timer = threading.Timer(timeout, kill)
             timer.daemon = True
             timer.start()
-            result = self.page.evaluate(js_code)
+
+            # 将 args 转换为可序列化的 Python 对象，传递给 JS
+            result = self.page.evaluate(js_code, arg=args)
             timer.cancel()
             return str(result) if result is not None else "(无返回值)"
         except Exception as e:
@@ -166,10 +170,10 @@ class BrowserService:
         self._custom_js[name] = js_code
         return f"已保存 JS 代码: {name}"
 
-    def _cmd_run_saved_js(self, name, timeout=30):
+    def _cmd_run_saved_js(self, name, timeout=30, args=None):
         if name not in self._custom_js:
             return f"未找到名为 '{name}' 的 JS 代码"
-        return self._cmd_execute_js(self._custom_js[name], timeout)
+        return self._cmd_execute_js(self._custom_js[name], timeout, args)
 
     def _cmd_click(self, target, by_ref=False):
         self._launch()

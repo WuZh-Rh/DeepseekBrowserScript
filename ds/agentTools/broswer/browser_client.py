@@ -97,14 +97,14 @@ class BrowserClient:
     def get_html(self):
         return self._send_command("get_html", {})
 
-    def execute_js(self, js_code, timeout=30):
-        return self._send_command("execute_js", {"js_code": js_code, "timeout": timeout})
+    def execute_js(self, js_code, timeout=30, args=None):
+        return self._send_command("execute_js", {"js_code": js_code, "timeout": timeout, "args": args})
 
     def save_js(self, name, js_code):
         return self._send_command("save_js", {"name": name, "js_code": js_code})
 
-    def run_saved_js(self, name, timeout=30):
-        return self._send_command("run_saved_js", {"name": name, "timeout": timeout})
+    def run_saved_js(self, name, timeout=30, args=None):
+        return self._send_command("run_saved_js", {"name": name, "timeout": timeout, "args": args})
 
     def click(self, target, by_ref=False):
         return self._send_command("click", {"target": target, "by_ref": by_ref})

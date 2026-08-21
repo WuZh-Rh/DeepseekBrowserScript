@@ -24,7 +24,7 @@ class DeepSeekBrowser:
     def launch(self):
         logger.info("正在启动浏览器，使用持久化会话...")
         self.playwright = sync_playwright().start()
-        session_dir = Path(CONFIG["SESSION_DIR"])
+        session_dir = Path(CONFIG["SESSION_DIR"]) / "main"
         session_dir.mkdir(parents=True, exist_ok=True)
 
         # 持久化上下文
@@ -32,7 +32,8 @@ class DeepSeekBrowser:
             user_data_dir=str(session_dir),
             headless=CONFIG["HEADLESS"],
             viewport={"width": 1280, "height": 900},
-            user_agent="Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+            user_agent="Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 "
+                       "Safari/537.36",
             args=[
                 "--disable-blink-features=AutomationControlled",
                 "--no-first-run",

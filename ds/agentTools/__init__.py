@@ -14,6 +14,7 @@ def init_tools():
     from ds.agentTools import file
     from ds.agentTools import qqbot
     from ds.agentTools import task
+    from ds.agentTools.broswer import browser
 
 
 # ---- 工具描述和调度 ----

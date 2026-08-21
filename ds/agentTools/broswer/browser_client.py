@@ -87,7 +87,7 @@ class BrowserClient:
     def wait_for_timeout(self, ms=1000):
         return self._send_command("wait", {"ms": ms})
 
-    def get_json_snapshot(self, max_depth=6, max_children=30, max_nodes=300):
+    def get_json_snapshot(self, max_depth=50, max_children=30, max_nodes=300):
         return self._send_command("get_json_snapshot", {
             "max_depth": max_depth,
             "max_children": max_children,

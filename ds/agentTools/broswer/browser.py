@@ -24,7 +24,7 @@ def _get_client():
 
 
 # ---------- 工具函数（保持不变，仅调用 _CLIENT 方法） ----------
-def tool_browser_get_json_snapshot(max_depth=6, max_children=30, max_nodes=300):
+def tool_browser_get_json_snapshot(max_depth=50, max_children=30, max_nodes=300):
     return _get_client().get_json_snapshot(max_depth, max_children, max_nodes)
 
 
@@ -101,7 +101,7 @@ TOOLS["browser_execute_js"] = {
 TOOLS["browser_json_snapshot"] = {
     "description": "获取当前页面的 DOM 树 JSON 快照（含 class、id、href、src 等属性，交互元素带 ref），用于 AI 分析页面结构。",
     "parameters": {
-        "max_depth": {"type": "number", "required": False, "description": "最大遍历深度，默认 10"},
+        "max_depth": {"type": "number", "required": False, "description": "最大遍历深度，默认 50"},
         "max_children": {"type": "number", "required": False, "description": "每层最大子节点数，默认 100"},
         "max_nodes": {"type": "number", "required": False, "description": "总节点数上限，默认 150"},
     },

@@ -77,7 +77,11 @@ def main():
         ]
 
     if args.session_dir:
-        session_dir = Path(args.session_dir).resolve()
+        temp_session_dir = Path(args.session_dir)
+        if temp_session_dir.is_absolute():
+            session_dir = temp_session_dir.resolve()  # 绝对路径保留并转为规范绝对路径（也可直接使用 p）
+        else:
+            session_dir = (Path("session") / args.session_dir).resolve()  # 相对路径前加 session/ 再解析为绝对路径
         # 确保目录存在
         session_dir.mkdir(parents=True, exist_ok=True)
         CONFIG["SESSION_DIR"] = str(session_dir)

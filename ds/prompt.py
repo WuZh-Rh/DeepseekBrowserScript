@@ -115,7 +115,9 @@ class ConversationManager:
 
     def add_tool_result(self, tool_name, result, is_error):
         status = "错误" if is_error else "成功"
+        timestamp = datetime.now().strftime("[%Y-%m-%d %H:%M:%S]")
         content = "\n".join([
+            timestamp,
             f"[工具结果：{tool_name} | {status}]",
             str(result),
             "[工具结果结束]",

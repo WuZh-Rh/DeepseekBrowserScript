@@ -87,8 +87,8 @@ def tool_browser_wait(ms):
 TOOLS["browser_navigate"] = {
     "description": "导航到指定 URL。",
     "parameters": {
-        "url": {"type": "string", "required": True},
-        "timeout": {"type": "number", "required": False, "default": 30000},
+        "url": {"type": "string", "required": True, "description": "填入指定的url 将会导航至指定位置"},
+        "timeout": {"type": "number", "required": False, "default": 30000, "description": "超时时间(ms) 默认30000ms"},
     },
     "execute": tool_browser_navigate,
 }

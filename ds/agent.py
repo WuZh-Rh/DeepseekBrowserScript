@@ -150,12 +150,8 @@ class DeepSeekAgent:
 
                     try:
                         tool_result = execute_tool(name, args)
-                        if type(tool_result) is str:
-                            result = tool_result
-                        else:
-                            result = tool_result["data"]
-                            result_success = tool_result["success"]
-                        result: str
+                        result = tool_result["data"]
+                        result_success = tool_result["success"]
                         if result is None and name == "run_test":
                             return {"content": "", "completed": True}
                         logger.tool_result(result)

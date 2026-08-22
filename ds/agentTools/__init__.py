@@ -45,7 +45,16 @@ def execute_tool(name, args) -> dict[str, str]:
         available = ", ".join([i for i in TOOLS.keys() if i in allow_tools])
         raise ValueError(f"未知工具: \"{name}\", 可用工具: {available}")
     try:
-        return tool["execute"](**args)
+        result = tool["execute"](**args)
+        if isinstance(result, dict):
+            result["success"] = result.get("success", True)
+            result["data"] = result.get("data", "(工具无返回内容)")
+            return result
+        if isinstance(result, str):
+            return {"data": result, "success": True}
+        from ds.logger import logger
+        logger.warn(f"工具[{name}]({args})返回了非法返回值(type:{type(result)}) 将其自动转为str: {str(result)}")
+        return {"data": str(result), "success": True}
     except Exception as e:
         # 捕获异常并重新抛出，让上层处理
         raise RuntimeError(f"工具执行错误: {e}") from e

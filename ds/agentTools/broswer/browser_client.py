@@ -19,9 +19,12 @@ def _start_service(self):
         self._started = True
         return
 
+    from ds.config import CONFIG
+    config_copy = dict(CONFIG)  # 浅拷贝足够，因为值是基础类型
+
     self.process = multiprocessing.Process(
         target=_run_browser_service,
-        args=(self.command_queue, self.result_queue),
+        args=(self.command_queue, self.result_queue, config_copy),
         daemon=True
     )
     self.process.start()
@@ -29,9 +32,11 @@ def _start_service(self):
     time.sleep(0.5)  # 等待服务就绪
 
 
-def _run_browser_service(cmd_queue, result_queue):
+def _run_browser_service(cmd_queue, result_queue, config):
     """模块级函数，作为子进程入口（可 pickle）"""
     from ds.agentTools.broswer.browser_service import BrowserService
+    from ds.config import CONFIG
+    CONFIG.update(config)
     service = BrowserService(cmd_queue, result_queue)
     service.run()
 
@@ -51,9 +56,10 @@ class BrowserClient:
         """启动子进程服务"""
         if self._started:
             return
+        from ds.config import CONFIG
         self.process = multiprocessing.Process(
             target=_run_browser_service,
-            args=(self.command_queue, self.result_queue),
+            args=(self.command_queue, self.result_queue, CONFIG),
             daemon=True
         )
         self.process.start()

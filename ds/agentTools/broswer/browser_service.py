@@ -27,7 +27,6 @@ except RuntimeError:
 from playwright.sync_api import sync_playwright, Page
 
 from ds.config import CONFIG
-from ds.logger import logger
 
 
 class BrowserService:

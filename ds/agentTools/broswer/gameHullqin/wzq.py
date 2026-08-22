@@ -697,7 +697,7 @@ TOOLS["huliqin_wzq_get_board"] = {
 
 TOOLS["huliqin_wzq_drop_stone"] = {
     "description": "在五子棋(https://game.hullqin.cn/wzq/*)棋盘上落子。仅当页面显示“等你下棋”时可用（即轮到己方回合）。坐标支持 'A1'~'O15' 或 '1,1'~'15,"
-                   "15' 格式。内部通过模拟点击棋盘上对应位置的 DOM 元素来实现落子。",
+                   "15' 格式。内部通过模拟点击棋盘上对应位置的 DOM 元素来实现落子。且在工具结束后自动返回board_data",
     "parameters": {
         "pos": {
             "type": "string",
@@ -723,7 +723,7 @@ TOOLS["huliqin_wzq_get_room_status"] = {
 }
 
 TOOLS["huliqin_wzq_wait_my_turn"] = {
-    "description": "阻塞等待直到页面显示“等你下棋”（即轮到己方回合）。可设置超时时间（秒）。",
+    "description": "阻塞等待直到页面显示“等你下棋”（即轮到己方回合）。可设置超时时间（秒）。且自动返回board_data",
     "parameters": {
         "timeout": {"type": "integer", "required": False, "default": 30, "description": "最大等待时间（秒）"},
         "poll_interval": {"type": "number", "required": False, "default": 1.0, "description": "轮询间隔（秒）"}

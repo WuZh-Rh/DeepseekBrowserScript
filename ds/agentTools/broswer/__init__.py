@@ -8,3 +8,4 @@
 from ds.agentTools.broswer.browser_service import *
 from ds.agentTools.broswer.browser_client import *
 from ds.agentTools.broswer.browser import *
+from ds.agentTools.broswer import gameHullqin

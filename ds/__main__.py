@@ -81,7 +81,7 @@ def main():
         # 确保目录存在
         session_dir.mkdir(parents=True, exist_ok=True)
         CONFIG["SESSION_DIR"] = str(session_dir)
-        logger.info(f"会话目录已指定: {CONFIG['SESSION_DIR'] / 'main'}")
+        logger.info(f"会话目录已指定: {CONFIG['SESSION_DIR']}\\main")
     if args.test_bat:
         CONFIG["TEST_BAT_PATH"] = str(Path(args.test_bat).resolve())
     if args.max_iterations is not None:

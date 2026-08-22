@@ -24,9 +24,14 @@ def _get_client():
 
 
 # ---------- 工具函数（保持不变，仅调用 _CLIENT 方法） ----------
-def tool_browser_get_json_snapshot(max_depth=50, max_children=30, max_nodes=300):
-    return _get_client().get_json_snapshot(max_depth, max_children, max_nodes)
-
+def tool_browser_get_json_snapshot(max_depth=10, max_children=200, max_nodes=500,
+                                   include_attrs=None, exclude_attrs=None):
+    if exclude_attrs is None:
+        exclude_attrs = ["style"]  # 默认排除 style
+    return _get_client().get_json_snapshot(
+        max_depth, max_children, max_nodes,
+        include_attrs or [], exclude_attrs
+    )
 
 def tool_browser_get_html():
     return _get_client().get_html()
@@ -100,11 +105,17 @@ TOOLS["browser_execute_js"] = {
 }
 
 TOOLS["browser_json_snapshot"] = {
-    "description": "获取当前页面的 DOM 树 JSON 快照（含 class、id、href、src 等属性，交互元素带 ref），用于 AI 分析页面结构。",
+    "description": (
+        "获取当前页面的 DOM 树 JSON 快照，用于结构化分析页面结构。"
+        "支持属性过滤：传入 include_attrs 则只保留指定属性（白名单），否则按 exclude_attrs 排除（默认排除 style）。"
+        "属性名支持通配符 *，如 'on*' 匹配所有 on 开头属性。"
+    ),
     "parameters": {
-        "max_depth": {"type": "number", "required": False, "description": "最大遍历深度，默认 50"},
-        "max_children": {"type": "number", "required": False, "description": "每层最大子节点数，默认 100"},
-        "max_nodes": {"type": "number", "required": False, "description": "总节点数上限，默认 150"},
+        "max_depth": {"type": "number", "required": False, "description": "最大遍历深度，默认 10"},
+        "max_children": {"type": "number", "required": False, "description": "每层最大子节点数，默认 200"},
+        "max_nodes": {"type": "number", "required": False, "description": "总节点数上限，默认 500"},
+        "include_attrs": {"type": "array", "items": {"type": "string"}, "required": False, "description": "白名单属性列表，非空时忽略黑名单"},
+        "exclude_attrs": {"type": "array", "items": {"type": "string"}, "required": False, "description": "黑名单属性列表，默认 ['style']"},
     },
     "execute": tool_browser_get_json_snapshot,
 }

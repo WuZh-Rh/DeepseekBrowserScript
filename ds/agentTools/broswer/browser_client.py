@@ -93,11 +93,18 @@ class BrowserClient:
     def wait_for_timeout(self, ms=1000):
         return self._send_command("wait", {"ms": ms})
 
-    def get_json_snapshot(self, max_depth=50, max_children=30, max_nodes=300):
+    def get_json_snapshot(
+        self, max_depth=10, max_children=200, max_nodes=500,
+        include_attrs=None, exclude_attrs=None
+    ):
+        if exclude_attrs is None:
+            exclude_attrs = ["style"]
         return self._send_command("get_json_snapshot", {
             "max_depth": max_depth,
             "max_children": max_children,
-            "max_nodes": max_nodes
+            "max_nodes": max_nodes,
+            "include_attrs": include_attrs or [],
+            "exclude_attrs": exclude_attrs
         })
 
     def get_html(self):

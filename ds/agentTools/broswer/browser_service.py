@@ -120,12 +120,18 @@ class BrowserService:
         self.page.wait_for_timeout(ms)
         return f"已等待 {ms} 毫秒"
 
-    def _cmd_get_json_snapshot(self, max_depth=6, max_children=30, max_nodes=300):
-        self._launch()
+    def _cmd_get_json_snapshot(
+        self, max_depth=10, max_children=200, max_nodes=500,
+        include_attrs=None, exclude_attrs=None
+    ):
+        if exclude_attrs is None:
+            exclude_attrs = ["style"]
         params = {
             "maxDepth": max_depth,
             "maxChildren": max_children,
-            "maxNodesLimit": max_nodes
+            "maxNodesLimit": max_nodes,
+            "includeAttrs": include_attrs or [],
+            "excludeAttrs": exclude_attrs
         }
         js_path = Path(__file__).parent / "dom_snapshot.js"
         with open(js_path, "r", encoding="utf-8") as f:

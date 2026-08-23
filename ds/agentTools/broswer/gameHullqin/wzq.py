@@ -8,6 +8,7 @@
 from typing import Dict, Any, Optional, Tuple, List
 
 import json
+import time
 import re
 
 from ds.agentTools import TOOLS
@@ -569,6 +570,7 @@ def drop_stone(pos: str):
         data = json.loads(result_str)
         if data.get("error"):
             return {"success": False, "data": data["error"]}
+        time.sleep(1)
         return {
             "success": True,
             "data": {
@@ -664,7 +666,6 @@ def huliqin_wzq_wait_my_turn(timeout: int = 30, poll_interval: float = 1.0):
     :param poll_interval: 轮询间隔（秒）
     :return: {"success": bool, "data": str}
     """
-    import time
     start = time.time()
     while time.time() - start < timeout:
         status = get_board_data()
@@ -742,7 +743,9 @@ if __name__ == '__main__':
         tool_browser_navigate("https://game.hullqin.cn/wzq/14mv")
         data = get_board_data()
         print(data)
-        data = drop_stone("B2")
+        drop_pos = "N2"
+        print(_parse_pos(drop_pos))
+        data = drop_stone("N2")
         print(data)
         data = huliqin_wzq_get_room_status()
         print(data)

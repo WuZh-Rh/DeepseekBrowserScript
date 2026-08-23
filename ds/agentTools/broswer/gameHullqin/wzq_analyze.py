@@ -11,7 +11,7 @@ WINDOW_SIZE = 6
 
 # ---------- 坐标转换辅助 ----------
 def _coord_to_str(r: int, c: int) -> str:
-    return f"{chr(ord('A') + c)}{r + 1}({c},{r})"
+    return f"{chr(ord('A') + c)}{r + 1}({r},{c})"
 
 
 def _convert_coords(obj):

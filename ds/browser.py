@@ -345,6 +345,28 @@ class DeepSeekBrowser:
     def _is_generating(self):
         return self.page.evaluate("""
             () => {
+                // ===== 1. 优先检测：是否存在“禁用的发送键”（即生成已结束） =====
+                // 查找所有带有 ds-button 类的按钮
+                const buttons = document.querySelectorAll('div[role="button"].ds-button');
+                for (const btn of buttons) {
+                    // 检查是否为发送图标（向上箭头）—— 通过 SVG path 特征判断
+                    const svg = btn.querySelector('svg');
+                    if (!svg) continue;
+                    const path = svg.querySelector('path');
+                    if (!path) continue;
+                    const d = path.getAttribute('d');
+                    // 发送键的特征：path 包含 "M8.3125" 且不包含 "M2"（矩形标识）
+                    if (d && d.includes('M8.3125') && !d.includes('M2')) {
+                        // 如果是禁用的发送键，则生成已结束，返回 false
+                        if (btn.classList.contains('ds-button--disabled')) {
+                            return false;
+                        }
+                        // 如果找到可用的发送键（非禁用），虽然不太可能出现在生成中，但为了安全也视为结束
+                        // 但这里我们不处理，因为生成中应该是停止键而非发送键
+                    }
+                }
+
+                // ===== 2. 原逻辑：停止按钮检测 =====
                 const stopSelectors = [
                     'button[aria-label*="Stop" i]',
                     '[class*="stop-gen"]',

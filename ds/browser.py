@@ -204,6 +204,24 @@ class DeepSeekBrowser:
         return False
 
     def wait_for_response(self):
+        def click_retry():
+            return self.page.evaluate("""
+                () => {
+                    const xpath = "//*[contains(text(), '消息发送过于频繁')]";
+                    const result = document.evaluate(xpath, document, null, XPathResult.FIRST_ORDERED_NODE_TYPE, null);
+                    const node = result.singleNodeValue;
+                    if (!node) return false;
+                    // 查找错误文本前面的第一个 div[role="button"]（即你指定的这个按钮）
+                    const btnXPath = ".//preceding::div[@role='button'][1]";
+                    const btnResult = document.evaluate(btnXPath, node, null, XPathResult.FIRST_ORDERED_NODE_TYPE, null);
+                    const btn = btnResult.singleNodeValue;
+                    if (btn) {
+                        btn.click();
+                        return true;
+                    }
+                    return false;
+                }
+            """)
         timeout = CONFIG["RESPONSE_TIMEOUT"] / 1000.0
         stable_delay = CONFIG["STABLE_DELAY"] / 1000.0
         start = time.time()
@@ -212,8 +230,26 @@ class DeepSeekBrowser:
         appeared = False
         while time.time() - start < 12:
             prompts = self._get_prompt_texts()
-            if "达到对话长度上限，请开启新对话" in prompts:
+            if any("达到对话长度上限" in prompt for prompt in prompts):
                 raise RuntimeError("对话达到长度限制")
+            retry_count = -1
+            retry_fail = 0
+            for retry_count in range(99, -1, -1):
+                if not any("消息发送过于频繁" in prompt for prompt in prompts):
+                    break
+                LOGGER.warn(f"消息发送过于频繁 正在进行第{100-retry_count}/100次重试")
+                click = click_retry()
+                if not click:
+                    retry_fail += 1
+                    LOGGER.warn(f"重试按钮点击失败({retry_fail}/10)")
+                time.sleep(3)
+                if retry_fail == 10:
+                    raise RuntimeError("消息发送过于频繁且重试按钮点击失败")
+                prompts = self._get_prompt_texts()
+                start = time.time()
+                initial_count = self._get_message_count()
+            if retry_count == 0:
+                raise RuntimeError("消息发送过于频繁")
             if self._get_message_count() > initial_count:
                 appeared = True
                 break

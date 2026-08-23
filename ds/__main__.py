@@ -14,6 +14,7 @@ from pathlib import Path
 from ds.config import CONFIG
 from ds.logger import logger, init_log_file
 from ds.agent import DeepSeekAgent
+from ds.agentTools import init_tools
 
 SELF_PATH = os.getcwd()
 
@@ -44,6 +45,7 @@ def parse_args():
     parser.add_argument("-m", "--max-iterations", type=int, help="限制 Agent 的最大循环轮数（默认 150）")
     parser.add_argument("-S", "--session-dir", dest="session_dir", help="指定会话目录")
     parser.add_argument("--deny-tools", nargs='+', help="禁用指定的工具，空格分隔", default=None)
+    parser.add_argument("--ext-tools", nargs='+', help="扩展工具['wzq', ](默认不添加)", default=None)
     parser.add_argument("--task-path", help="从文件读取任务内容")
     parser.add_argument("--load-file", help="上传/加载指定文件")
     parser.add_argument("rest", nargs="*", help="任务文本（不带 -t 时）")
@@ -75,6 +77,10 @@ def main():
         CONFIG["allow_tools"] = [
             tool_name for tool_name in TOOLS.keys()
         ]
+    if args.ext_tools:
+        CONFIG["EXT_TOOLS"] = args.ext_tools
+    else:
+        CONFIG["EXT_TOOLS"] = []
 
     if args.session_dir:
         temp_session_dir = Path(args.session_dir)
@@ -109,6 +115,9 @@ def main():
     # 如果指定了 log_name，使用固定文件模式（is_fixed=True）
     init_log_file(log_file_path, is_fixed=args.no_roll, roll_name=args.roll_name)
     logger.info(f"日志文件   : {log_file_path}")
+
+    # 初始化所有工具
+    init_tools()
 
     # 确定任务
     task = args.task

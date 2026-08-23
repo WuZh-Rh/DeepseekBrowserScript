@@ -58,6 +58,3 @@ def execute_tool(name, args) -> dict[str, str]:
     except Exception as e:
         # 捕获异常并重新抛出，让上层处理
         raise RuntimeError(f"工具执行错误: {e}") from e
-
-
-init_tools()

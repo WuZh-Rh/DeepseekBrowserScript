@@ -17,6 +17,16 @@ from ds.agentTools import execute_tool
 from ds.prompt import ConversationManager
 
 
+def _get_prompt():
+    prompt_file = CONFIG["PROMPT_FILE"]
+    if not prompt_file.exists():
+        prompt_file.touch()
+    with open(prompt_file, "r", encoding="utf-8") as f:
+        result = f.read()
+    open(prompt_file, 'w').close()
+    return ("\n" + result) if result else ""
+
+
 class DeepSeekAgent:
     def __init__(self, options=None):
         options = options or {}
@@ -103,7 +113,7 @@ class DeepSeekAgent:
             LOGGER.dim(first_msg[:600] + "...")
 
         LOGGER.info("正在向 DeepSeek 发送任务...")
-        self.browser.send_message(first_msg)
+        self.browser.send_message(first_msg + _get_prompt())
 
         test_failed = False
         other_tool_called_after_test = False
@@ -117,7 +127,7 @@ class DeepSeekAgent:
                 return {"data": {"content": traceback.format_exc()}, "completed": False}
             if not raw_response or not raw_response.strip():
                 LOGGER.warn("收到空响应 — 正在重试...")
-                self.browser.send_message("请继续。如果你在等待输入，请做出最佳判断后继续。")
+                self.browser.send_message("请继续。如果你在等待输入，请做出最佳判断后继续。" + _get_prompt())
                 continue
 
             if CONFIG["DEBUG"]:
@@ -144,6 +154,7 @@ class DeepSeekAgent:
                                 "⚠️ 测试已失败过了，你尚未调用任何其他工具来修复问题。请先使用其他工具修复代码。",
                                 True
                             )
+                            warning += _get_prompt()
                             self.browser.send_message(warning)
                             feedback = None
                             break
@@ -180,8 +191,9 @@ class DeepSeekAgent:
                     feedback += self.conversation.add_tool_result(name, result, is_error)
                     if is_error or (not result_success):
                         break
-                if feedback is None:
+                if not feedback:
                     continue
+                feedback += _get_prompt()
                 self.browser.send_message(feedback)
                 self.done_test = False
                 continue
@@ -193,6 +205,7 @@ class DeepSeekAgent:
                     f"解析错误: {parsed['message']}\n\n请重新尝试有效的 JSON 格式工具调用。",
                     True
                 )
+                recovery += _get_prompt()
                 self.browser.send_message(recovery)
                 continue
 
@@ -205,6 +218,7 @@ class DeepSeekAgent:
                     "请立即调用合适的工具继续工作。",
                     True
                 )
+                force += _get_prompt()
                 self.browser.send_message(force)
                 continue
 

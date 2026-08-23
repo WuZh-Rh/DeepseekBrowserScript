@@ -43,8 +43,8 @@
         if (role && ['button','link','textbox','menuitem','checkbox','radio'].includes(role)) return true;
         if (el.hasAttribute('onclick')) return true;
         const tabindex = el.getAttribute('tabindex');
-        if (tabindex && parseInt(tabindex) >= 0) return true;
-        return false;
+        return !!(tabindex && parseInt(tabindex) >= 0);
+
     }
 
     // ----- 属性匹配（支持通配符 *） -----

@@ -9,7 +9,6 @@ import signal
 import subprocess
 import sys
 import threading
-import time
 from pathlib import Path
 
 from ds.agentTools import TOOLS
@@ -145,10 +144,10 @@ def tool_run_test():
     test_path = CONFIG.get("TEST_BAT_PATH")
     if not test_path:
         # 没有测试脚本，视为通过
-        return None
+        return {"success": True, "data": "测试通过"}
     abs_test = Path(test_path)
     if not abs_test.exists():
-        return None
+        return {"success": True, "data": "测试通过"}
     try:
         # Windows 下 .bat 文件需要用 shell=True
         result = subprocess.run(
@@ -178,10 +177,10 @@ TOOLS["run_test"] = {
 
 
 def tool_abort_task(reason, errorCode):
-    from ds.logger import logger
-    logger.info(f"\n🚨 [中止] AI 请求中止任务。原因：{reason}")
-    logger.info(f"以错误码 {errorCode} 退出。")
-    sys.exit(errorCode)
+    from ds.logger import LOGGER
+    LOGGER.info(f"\n🚨 [中止] AI 请求中止任务。原因：{reason}")
+    LOGGER.info(f"以错误码 {errorCode} 退出。")
+    return {"success": True, "data": f"{errorCode}"}
 
 
 TOOLS["abort_task"] = {

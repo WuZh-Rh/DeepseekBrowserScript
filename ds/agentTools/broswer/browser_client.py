@@ -5,6 +5,7 @@
 """
 
 import multiprocessing
+import queue
 import time
 from typing import Any, Dict, Optional
 
@@ -83,7 +84,7 @@ class BrowserClient:
             if "error" in result:
                 raise RuntimeError(result["error"])
             return result["result"]
-        except multiprocessing.queues.Empty:
+        except queue.Empty:
             raise TimeoutError(f"命令 {cmd} 执行超时（60秒）")
 
     # ---------- 对外接口 ----------

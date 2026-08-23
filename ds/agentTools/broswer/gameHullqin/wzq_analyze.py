@@ -50,7 +50,11 @@ def _get_cell_value(board: List[List[int]], r: int, c: int) -> int:
     return -1
 
 
-def _record_feature(window: List[int], result: Dict, color: int, feature_type: str, positions: List[Optional[Tuple[int, int]]]):
+def _record_feature(
+    window: List[int], result: Dict,
+    color: int, feature_type: str,
+    positions: List[Optional[Tuple[int, int]]]
+):
     """
     记录特征到 result 中
     color: 1 或 2

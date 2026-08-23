@@ -5,7 +5,7 @@
 # @Author  : Wu_RH
 # @FileName: wzq.py
 
-from typing import Dict, Any, Optional, Tuple, List
+from typing import Dict, Any, Optional, Tuple
 
 import json
 import time
@@ -131,10 +131,10 @@ def _parse_board_from_snapshot(snapshot: Dict[str, Any]) -> Dict[str, Any]:
     sx, sy, sw, sh = svg_rect['x'], svg_rect['y'], svg_rect['width'], svg_rect['height']
     viewBox_left, viewBox_top, viewBox_width, viewBox_height = -80, -80, 160, 160
 
-    def screen_to_view(px, py):
-        vx = viewBox_left + (px - sx) / sw * viewBox_width
-        vy = viewBox_top + (py - sy) / sh * viewBox_height
-        return vx, vy
+    def screen_to_view(_px, _py):
+        _vx = viewBox_left + (_px - sx) / sw * viewBox_width
+        _vy = viewBox_top + (_py - sy) / sh * viewBox_height
+        return _vx, _vy
 
     # 2. 收集所有 text 节点（数字和字母）
     all_texts = _find_all_nodes(tree, tag='text')
@@ -192,7 +192,6 @@ def _parse_board_from_snapshot(snapshot: Dict[str, Any]) -> Dict[str, Any]:
         except ValueError:
             continue
         fill = use.get('fill', '')
-        color = 0
         if 'black' in fill:
             color = 1
         elif 'white' in fill:
@@ -234,13 +233,13 @@ def _parse_board_from_snapshot(snapshot: Dict[str, Any]) -> Dict[str, Any]:
     seat0 = _find_node(tree, tag='div', attrs={'id': 'userseat0'})
     seat1 = _find_node(tree, tag='div', attrs={'id': 'userseat1'})
 
-    def has_me(node):
-        if not isinstance(node, dict):
+    def has_me(_node):
+        if not isinstance(_node, dict):
             return False
-        if node.get('text', '').strip() == '我':
+        if _node.get('text', '').strip() == '我':
             return True
-        for child in node.get('children', []):
-            if has_me(child):
+        for _child in _node.get('children', []):
+            if has_me(_child):
                 return True
         return False
 
@@ -260,17 +259,17 @@ def _parse_board_from_snapshot(snapshot: Dict[str, Any]) -> Dict[str, Any]:
     # 递归查找 class 包含 'space-x-4' 的 div
     status_container: Optional[Dict] = None
 
-    def find_space_x_4(node):
+    def find_space_x_4(_node):
         nonlocal status_container
-        if not isinstance(node, dict):
+        if not isinstance(_node, dict):
             return
-        if node.get('tag') == 'div':
-            cls = node.get('class', '')
+        if _node.get('tag') == 'div':
+            cls = _node.get('class', '')
             if cls and 'space-x-4' in cls:
-                status_container = node
+                status_container = _node
                 return
-        for child in node.get('children', []):
-            find_space_x_4(child)
+        for _child in _node.get('children', []):
+            find_space_x_4(_child)
             if status_container:
                 return
 
@@ -400,13 +399,13 @@ def _parse_room_info_from_snapshot(snapshot: Dict[str, Any]) -> Dict[str, Any]:
     my_seat = -1
     my_color = 0
 
-    def has_me(node):
-        if not isinstance(node, dict):
+    def has_me(_node):
+        if not isinstance(_node, dict):
             return False
-        if node.get('text', '').strip() == '我':
+        if _node.get('text', '').strip() == '我':
             return True
-        for child in node.get('children', []):
-            if has_me(child):
+        for _child in _node.get('children', []):
+            if has_me(_child):
                 return True
         return False
 

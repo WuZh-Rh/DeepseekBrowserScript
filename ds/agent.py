@@ -10,11 +10,11 @@ import sys
 import subprocess
 import traceback
 from pathlib import Path
-from .config import CONFIG
-from .logger import logger
-from .browser import DeepSeekBrowser
+from ds.config import CONFIG
+from ds.logger import LOGGER
+from ds.browser import DeepSeekBrowser
 from ds.agentTools import execute_tool
-from .prompt import ConversationManager
+from ds.prompt import ConversationManager
 
 
 class DeepSeekAgent:
@@ -61,7 +61,7 @@ class DeepSeekAgent:
             output = result.stdout.strip()
             return output or "(空目录)"
         except Exception as e:
-            logger.error(f"读取工作目录失败: {e}")
+            LOGGER.error(f"读取工作目录失败: {e}")
             return "(无法读取目录)"
 
     def _run_test_bat(self):
@@ -95,34 +95,34 @@ class DeepSeekAgent:
         # 目录快照
         dir_listing = self._get_working_dir_listing()
 
-        logger.header(f"任务: {task[:80]}{'…' if len(task)>80 else ''}")
+        LOGGER.header(f"任务: {task[:80]}{'…' if len(task) > 80 else ''}")
 
         first_msg = self.conversation.build_first_message(task, dir_listing)
         if CONFIG["DEBUG"]:
-            logger.dim("--- 第一条消息（已截断）---")
-            logger.dim(first_msg[:600] + "...")
+            LOGGER.dim("--- 第一条消息（已截断）---")
+            LOGGER.dim(first_msg[:600] + "...")
 
-        logger.info("正在向 DeepSeek 发送任务...")
+        LOGGER.info("正在向 DeepSeek 发送任务...")
         self.browser.send_message(first_msg)
 
         test_failed = False
         other_tool_called_after_test = False
 
         for iter_num in range(1, max_iter + 1):
-            logger.iteration(iter_num, max_iter)
+            LOGGER.iteration(iter_num, max_iter)
 
             try:
                 raw_response = self.browser.wait_for_response()
-            except Exception as e:
-                return {"content": str(e), "completed": False}
+            except Exception:
+                return {"data": {"content": traceback.format_exc()}, "completed": False}
             if not raw_response or not raw_response.strip():
-                logger.warn("收到空响应 — 正在重试...")
+                LOGGER.warn("收到空响应 — 正在重试...")
                 self.browser.send_message("请继续。如果你在等待输入，请做出最佳判断后继续。")
                 continue
 
             if CONFIG["DEBUG"]:
-                logger.dim(f"--- 原始响应（{len(raw_response)} 字符）---")
-                logger.dim(raw_response[:400])
+                LOGGER.dim(f"--- 原始响应（{len(raw_response)} 字符）---")
+                LOGGER.dim(raw_response[:400])
 
             self.conversation.add_assistant_message(raw_response)
 
@@ -133,7 +133,7 @@ class DeepSeekAgent:
                 for tool in parsed["tools"]:
                     name = tool["name"]
                     args = tool["args"]
-                    logger.tool_call(name, args)
+                    LOGGER.tool_call(name, args)
                     result_success = True
 
                     # 连续测试检查
@@ -152,14 +152,19 @@ class DeepSeekAgent:
                         tool_result = execute_tool(name, args)
                         result = tool_result["data"]
                         result_success = tool_result["success"]
-                        if result is None and name == "run_test":
-                            return {"content": "", "completed": True}
-                        logger.tool_result(result)
+                        if result_success and name == "run_test":
+                            return {"data": {"content": "run_test"}, "completed": True}
+                        if result_success and name == "abort_task":
+                            return {
+                                "data": {"content": "abort_task", "exitcode": int(result)},
+                                "completed": True
+                            }
+                        LOGGER.tool_result(result)
                         is_error = False
                     except Exception as e:
                         result = f"错误: {e}"
                         is_error = True
-                        logger.tool_result(result, True)
+                        LOGGER.tool_result(result, True)
 
                     # 更新状态
                     if name == "run_test":
@@ -182,7 +187,7 @@ class DeepSeekAgent:
                 continue
 
             elif parsed["type"] == "error":
-                logger.warn(f"解析错误: {parsed['message']}")
+                LOGGER.warn(f"解析错误: {parsed['message']}")
                 recovery = self.conversation.add_tool_result(
                     "SYSTEM",
                     f"解析错误: {parsed['message']}\n\n请重新尝试有效的 JSON 格式工具调用。",
@@ -192,7 +197,7 @@ class DeepSeekAgent:
                 continue
 
             elif parsed["type"] == "final":
-                logger.info("AI 试图直接输出最终答案且未调用任何工具。强制要求调用工具继续。")
+                LOGGER.info("AI 试图直接输出最终答案且未调用任何工具。强制要求调用工具继续。")
                 force = self.conversation.add_tool_result(
                     "SYSTEM",
                     "❌ 你未调用任何tools，但这不符合工作流程。\n\n"
@@ -205,12 +210,12 @@ class DeepSeekAgent:
 
         self._running = False
         warn = f"⚠ 已达到最大迭代次数 ({max_iter})。任务可能未完成。"
-        logger.warn(warn)
-        return {"content": warn, "completed": False}
+        LOGGER.warn(warn)
+        return {"data": {"content": warn}, "completed": False}
 
     def run_interactive(self):
-        logger.header("交互模式 — 输入你的任务，按回车执行")
-        logger.info('命令: "exit" 或 "quit" 退出, "new" 开始新对话\n')
+        LOGGER.header("交互模式 — 输入你的任务，按回车执行")
+        LOGGER.info('命令: "exit" 或 "quit" 退出, "new" 开始新对话\n')
 
         while True:
             try:
@@ -220,10 +225,10 @@ class DeepSeekAgent:
             if not task:
                 continue
             if task.lower() in ("exit", "quit", "q"):
-                logger.info("正在退出...")
+                LOGGER.info("正在退出...")
                 break
             if task.lower() == "new":
-                logger.info("开始新对话...")
+                LOGGER.info("开始新对话...")
                 self.browser.new_chat()
                 self.conversation = ConversationManager()
                 continue
@@ -234,6 +239,6 @@ class DeepSeekAgent:
                 self.run(task)
             except Exception as e:
                 error_str = traceback.format_exc()
-                logger.error(f"任务失败: {e}")
+                LOGGER.error(f"任务失败: {e}")
                 for error_line in error_str.split("\n"):
-                    logger.error(error_line)
+                    LOGGER.error(error_line)

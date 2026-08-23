@@ -354,7 +354,12 @@ TOOLS["find_files"] = {
 
 
 # 13. search_in_files
-def tool_search_in_files(pattern, directory=".", file_pattern=None, case_sensitive=False, context_lines=2):
+def tool_search_in_files(
+    pattern, directory=".",
+    file_pattern=None,
+    case_sensitive=False,
+    context_lines=2
+):
     root = resolve_path(directory)
     if not os.path.exists(root):
         raise FileNotFoundError(f"目录不存在：{directory}")
@@ -384,11 +389,11 @@ def tool_search_in_files(pattern, directory=".", file_pattern=None, case_sensiti
                 continue
             for i, line in enumerate(lines):
                 if search_re.search(line):
-                    # start = max(0, i - context_lines)
-                    # end = min(len(lines), i + context_lines + 1)
-                    # context = "\n".join(f"{idx + 1}: {lines[idx].rstrip()}" for idx in range(start, end))
-                    # matches.append(f"{full}:{i + 1} 附近:\n{context}")
-                    matches.append(f"{full}:{i + 1}: {line.strip()}")
+                    start = max(0, i - context_lines)
+                    end = min(len(lines), i + context_lines + 1)
+                    context = "\n".join(f"{idx + 1}: {lines[idx].rstrip()}" for idx in range(start, end))
+                    matches.append(f"{full}:{i + 1} 附近:\n{context}")
+                    # matches.append(f"{full}:{i + 1}: {line.strip()}")
                     if len(matches) >= max_matches:
                         break
             if len(matches) >= max_matches:

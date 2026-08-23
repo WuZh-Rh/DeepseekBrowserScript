@@ -11,10 +11,14 @@ import argparse
 import signal
 import traceback
 from pathlib import Path
+from typing import Optional
+
 from ds.config import CONFIG
-from ds.logger import logger, init_log_file
-from ds.agent import DeepSeekAgent
-from ds.agentTools import init_tools
+from ds import logger
+from ds.logger import getLogger, Logger
+
+
+LOGGER: Optional[Logger] = None
 
 SELF_PATH = os.getcwd()
 
@@ -33,17 +37,15 @@ def parse_args():
     )
     parser.add_argument("-t", "--task", help="要运行的任务（也可以不加标志直接写）")
     parser.add_argument("-i", "--interactive", action="store_true", help="交互式 REPL 模式")
-    parser.add_argument("-d", "--dir", dest="working_dir", help="设置工作目录（默认当前目录）")
+    parser.add_argument("-d", "--dir", "--work-dir", dest="working_dir", help="设置工作目录（默认当前目录）")
     parser.add_argument("--debug", action="store_true", help="输出详细的调试信息")
     parser.add_argument("--headless", action="store_true", help="无头模式运行浏览器")
     parser.add_argument("--save-log", action="store_true", help="保存会话日志到 ~/.deepseek-agent/logs/")
     parser.add_argument("--test-bat", dest="test_bat", help="指定测试脚本（.bat），用于验证最终结果")
     parser.add_argument("--log-path", dest="log_path", help="指定日志目录", default="./logs")
-    parser.add_argument("--log-name", dest="log_name", help="指定日志文件名（如 my.log）", default="latest.log")
-    parser.add_argument("--no-roll", dest="no_roll", action="store_true", help="禁用日志滚动（追加到同一个文件，默认每次运行生成新文件）")
     parser.add_argument("--roll-name", dest="roll_name", help="滚动日志的时候添加的后缀(YYYY-MM-DD-XXXX-?.log)", default="")
     parser.add_argument("-m", "--max-iterations", type=int, help="限制 Agent 的最大循环轮数（默认 150）")
-    parser.add_argument("-S", "--session-dir", dest="session_dir", help="指定会话目录")
+    parser.add_argument("-S", "--session-dir", dest="session_dir", help="指定会话目录", default="main")
     parser.add_argument("--deny-tools", nargs='+', help="禁用指定的工具，空格分隔", default=None)
     parser.add_argument("--ext-tools", nargs='+', help="扩展工具['wzq', ](默认不添加)", default=None)
     parser.add_argument("--task-path", help="从文件读取任务内容")
@@ -53,7 +55,39 @@ def parse_args():
 
 
 def main():
+    global LOGGER
     args = parse_args()
+
+    # 初始化日志
+    if args.session_dir:
+        temp_session_dir = Path(args.session_dir)
+        if hasattr(args, "roll_name") and args.roll_name == "":
+            args.roll_name = temp_session_dir.name
+
+    if sys.platform == 'win32':
+        if os.path.isabs(args.log_path):
+            log_dir = args.log_path
+        else:
+            log_dir = os.path.join(Path(SELF_PATH), Path(args.log_path))
+    else:
+        log_dir = os.path.expanduser("~/.deepseek-agent/logs")
+    log_dir = Path(log_dir)
+    log_dir.mkdir(parents=True, exist_ok=True)
+    log_name = "latest"
+    if args.roll_name:
+        log_name += "-" + args.roll_name
+    log_name += ".log"
+    log_file_path = str(log_dir / log_name)
+
+    LOGGER = getLogger(
+        name="MAIN",
+        logger_config={
+            "logfile": log_file_path,
+            "roll_name": args.roll_name,
+        }
+    )
+    logger.LOGGER = LOGGER
+    LOGGER.info(f"日志文件   : {log_file_path}")
 
     # 应用选项到配置
     if args.debug:
@@ -63,9 +97,35 @@ def main():
     if args.working_dir:
         resolved = Path(args.working_dir).resolve()
         if not resolved.exists():
-            logger.error(f"工作目录不存在: {resolved}")
+            LOGGER.error(f"工作目录不存在: {resolved}")
             sys.exit(1)
         CONFIG["WORKING_DIR"] = str(resolved)
+
+    if args.session_dir:
+        temp_session_dir = Path(args.session_dir)
+        if temp_session_dir.is_absolute():
+            session_dir = temp_session_dir.resolve()  # 绝对路径保留并转为规范绝对路径（也可直接使用 p）
+        else:
+            session_dir = (Path("session") / args.session_dir).resolve()  # 相对路径前加 session/ 再解析为绝对路径
+        # 确保目录存在
+        session_dir.mkdir(parents=True, exist_ok=True)
+        CONFIG["SESSION_DIR"] = str(session_dir)
+        LOGGER.info(f"会话目录已指定: {CONFIG['SESSION_DIR']}\\main")
+    if args.test_bat:
+        CONFIG["TEST_BAT_PATH"] = str(Path(args.test_bat).resolve())
+    if args.max_iterations is not None:
+        if args.max_iterations < 1:
+            LOGGER.error("--max-iterations 必须是正整数")
+            sys.exit(1)
+        CONFIG["MAX_ITERATIONS"] = args.max_iterations
+
+    # 初始化所有工具
+    if args.ext_tools:
+        CONFIG["EXT_TOOLS"] = args.ext_tools
+    else:
+        CONFIG["EXT_TOOLS"] = []
+    from ds.agentTools import init_tools
+    init_tools()
     if args.deny_tools:
         from ds.agentTools import TOOLS
         CONFIG["allow_tools"] = [
@@ -77,47 +137,6 @@ def main():
         CONFIG["allow_tools"] = [
             tool_name for tool_name in TOOLS.keys()
         ]
-    if args.ext_tools:
-        CONFIG["EXT_TOOLS"] = args.ext_tools
-    else:
-        CONFIG["EXT_TOOLS"] = []
-
-    if args.session_dir:
-        temp_session_dir = Path(args.session_dir)
-        if temp_session_dir.is_absolute():
-            session_dir = temp_session_dir.resolve()  # 绝对路径保留并转为规范绝对路径（也可直接使用 p）
-        else:
-            session_dir = (Path("session") / args.session_dir).resolve()  # 相对路径前加 session/ 再解析为绝对路径
-        # 确保目录存在
-        session_dir.mkdir(parents=True, exist_ok=True)
-        CONFIG["SESSION_DIR"] = str(session_dir)
-        logger.info(f"会话目录已指定: {CONFIG['SESSION_DIR']}\\main")
-    if args.test_bat:
-        CONFIG["TEST_BAT_PATH"] = str(Path(args.test_bat).resolve())
-    if args.max_iterations is not None:
-        if args.max_iterations < 1:
-            logger.error("--max-iterations 必须是正整数")
-            sys.exit(1)
-        CONFIG["MAX_ITERATIONS"] = args.max_iterations
-
-    # 初始化日志
-    if sys.platform == 'win32':
-        if os.path.isabs(args.log_path):
-            log_dir = args.log_path
-        else:
-            log_dir = os.path.join(Path(SELF_PATH), Path(args.log_path))
-    else:
-        log_dir = os.path.expanduser("~/.deepseek-agent/logs")
-    log_dir = Path(log_dir)
-    log_dir.mkdir(parents=True, exist_ok=True)
-    log_file_path = str(log_dir / args.log_name)
-
-    # 如果指定了 log_name，使用固定文件模式（is_fixed=True）
-    init_log_file(log_file_path, is_fixed=args.no_roll, roll_name=args.roll_name)
-    logger.info(f"日志文件   : {log_file_path}")
-
-    # 初始化所有工具
-    init_tools()
 
     # 确定任务
     task = args.task
@@ -126,22 +145,22 @@ def main():
             with open(args.task_path, 'r', encoding='utf-8') as f:
                 task = f.read().strip()
         except Exception as e:
-            logger.error(f"读取任务文件失败: {e}")
+            LOGGER.error(f"读取任务文件失败: {e}")
             sys.exit(1)
     if not task and args.rest:
         task = " ".join(args.rest)
 
     # 打印横幅
-    logger.banner()
-    logger.info(f"工作目录 : {CONFIG['WORKING_DIR']}")
-    logger.info(f"会话目录 : {CONFIG['SESSION_DIR']}")
-    logger.info(f"无头模式   : {CONFIG['HEADLESS']}")
-    logger.info(f"调试模式   : {CONFIG['DEBUG']}")
-    logger.info(f"最大轮数   : {CONFIG['MAX_ITERATIONS']}")
-    logger.info(f"日志文件   : {log_file_path}")
+    LOGGER.info(f"工作目录 : {CONFIG['WORKING_DIR']}")
+    LOGGER.info(f"会话目录 : {CONFIG['SESSION_DIR']}")
+    LOGGER.info(f"无头模式   : {CONFIG['HEADLESS']}")
+    LOGGER.info(f"调试模式   : {CONFIG['DEBUG']}")
+    LOGGER.info(f"最大轮数   : {CONFIG['MAX_ITERATIONS']}")
+    LOGGER.info(f"日志文件   : {log_file_path}")
     print()
 
     # 创建 Agent
+    from ds.agent import DeepSeekAgent
     agent = DeepSeekAgent({
         "save_log": args.save_log,
         "test_bat": args.test_bat,
@@ -150,28 +169,28 @@ def main():
 
     # 信号处理
     def shutdown(code=0):
-        logger.info("正在关闭...")
+        LOGGER.info("正在关闭...")
         try:
             agent.shutdown()
         except:
             pass
         sys.exit(code)
 
-    signal.signal(signal.SIGINT, lambda s, f: shutdown(0))
-    signal.signal(signal.SIGTERM, lambda s, f: shutdown(0))
+    signal.signal(signal.SIGINT, lambda s, _f: shutdown(0))
+    signal.signal(signal.SIGTERM, lambda s, _f: shutdown(0))
 
     # 无任务则进入交互
     if not args.interactive and not task:
-        logger.warn("未提供任务。切换到交互模式...\n")
+        LOGGER.warn("未提供任务。切换到交互模式...\n")
         args.interactive = True
 
     try:
         agent.init()
     except Exception as e:
         error_str = traceback.format_exc()
-        logger.error(f"任务失败: {e}")
+        LOGGER.error(f"任务失败: {e}")
         for error_line in error_str.split("\n"):
-            logger.error(error_line)
+            LOGGER.error(error_line)
         sys.exit(1)
 
     try:
@@ -182,14 +201,16 @@ def main():
                 agent.browser.load_file(args.load_file)
             result = agent.run(task)
             if not result.get("completed", False):
-                logger.error("任务失败，未能完成。")
-                logger.error(result.get("content", ""))
+                LOGGER.error("任务失败，未能完成。")
+                LOGGER.error(result.get("content", ""))
                 shutdown(1)
+            if result.get("data", {"content": ""}).get("content", "") == "abort_task":
+                shutdown(result.get("data", {"exitcode": 0}).get("exitcode", 0))
     except Exception as e:
         error_str = traceback.format_exc()
-        logger.error(f"任务失败: {e}")
+        LOGGER.error(f"任务失败: {e}")
         for error_line in error_str.split("\n"):
-            logger.error(error_line)
+            LOGGER.error(error_line)
         shutdown(1)
 
     shutdown(0)

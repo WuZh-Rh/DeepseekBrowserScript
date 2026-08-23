@@ -24,14 +24,17 @@ def _get_client():
 
 
 # ---------- 工具函数（保持不变，仅调用 _CLIENT 方法） ----------
-def tool_browser_get_json_snapshot(max_depth=10, max_children=200, max_nodes=500,
-                                   include_attrs=None, exclude_attrs=None):
+def tool_browser_get_json_snapshot(
+    max_depth=10, max_children=200, max_nodes=500,
+    include_attrs=None, exclude_attrs=None
+):
     if exclude_attrs is None:
         exclude_attrs = ["style"]  # 默认排除 style
     return _get_client().get_json_snapshot(
         max_depth, max_children, max_nodes,
         include_attrs or [], exclude_attrs
     )
+
 
 def tool_browser_get_html():
     return _get_client().get_html()
@@ -99,7 +102,8 @@ TOOLS["browser_execute_js"] = {
         "js_code": {"type": "string", "required": True, "description": "要执行的 JavaScript 代码"},
         "save_as": {"type": "string", "required": False, "description": "可选，保存此脚本的名称"},
         "timeout": {"type": "number", "required": False, "description": "超时时间（秒），默认 30"},
-        "args": {"type": "object", "required": False, "description": "传递给 JS 代码的参数对象，可在 JS 中通过 arguments[0] 或函数形参获取"},
+        "args": {"type": "object", "required": False,
+                 "description": "传递给 JS 代码的参数对象，可在 JS 中通过 arguments[0] 或函数形参获取"},
     },
     "execute": tool_browser_execute_js,
 }
@@ -114,8 +118,10 @@ TOOLS["browser_json_snapshot"] = {
         "max_depth": {"type": "number", "required": False, "description": "最大遍历深度，默认 10"},
         "max_children": {"type": "number", "required": False, "description": "每层最大子节点数，默认 200"},
         "max_nodes": {"type": "number", "required": False, "description": "总节点数上限，默认 500"},
-        "include_attrs": {"type": "array", "items": {"type": "string"}, "required": False, "description": "白名单属性列表，非空时忽略黑名单"},
-        "exclude_attrs": {"type": "array", "items": {"type": "string"}, "required": False, "description": "黑名单属性列表，默认 ['style']"},
+        "include_attrs": {"type": "array", "items": {"type": "string"}, "required": False,
+                          "description": "白名单属性列表，非空时忽略黑名单"},
+        "exclude_attrs": {"type": "array", "items": {"type": "string"}, "required": False,
+                          "description": "黑名单属性列表，默认 ['style']"},
     },
     "execute": tool_browser_get_json_snapshot,
 }
@@ -137,7 +143,8 @@ TOOLS["browser_run_saved_js"] = {
     "parameters": {
         "name": {"type": "string", "required": True, "description": "保存时的名称"},
         "timeout": {"type": "number", "required": False, "description": "超时时间（秒），默认 30"},
-        "args": {"type": "object", "required": False, "description": "传递给 JS 代码的参数对象，可在 JS 中通过 arguments[0] 获取"},
+        "args": {"type": "object", "required": False,
+                 "description": "传递给 JS 代码的参数对象，可在 JS 中通过 arguments[0] 获取"},
     },
     "execute": tool_browser_run_saved_js,
 }

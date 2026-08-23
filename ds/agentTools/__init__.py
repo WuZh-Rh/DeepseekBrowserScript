@@ -52,8 +52,8 @@ def execute_tool(name, args) -> dict[str, str]:
             return result
         if isinstance(result, str):
             return {"data": result, "success": True}
-        from ds.logger import logger
-        logger.warn(f"工具[{name}]({args})返回了非法返回值(type:{type(result)}) 将其自动转为str: {str(result)}")
+        from ds.logger import LOGGER
+        LOGGER.warn(f"工具[{name}]({args})返回了非法返回值(type:{type(result)}) 将其自动转为str: {str(result)}")
         return {"data": str(result), "success": True}
     except Exception as e:
         # 捕获异常并重新抛出，让上层处理

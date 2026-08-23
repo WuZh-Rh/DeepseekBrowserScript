@@ -12,7 +12,7 @@ import traceback
 from playwright.sync_api import sync_playwright
 from pathlib import Path
 from .config import CONFIG
-from .logger import logger
+from .logger import LOGGER
 
 
 class DeepSeekBrowser:
@@ -24,7 +24,7 @@ class DeepSeekBrowser:
         self._closed = False
 
     def launch(self):
-        logger.info("正在启动浏览器，使用持久化会话...")
+        LOGGER.info("正在启动浏览器，使用持久化会话...")
         self.playwright = sync_playwright().start()
         session_dir = Path(CONFIG["SESSION_DIR"]) / "main"
         session_dir.mkdir(parents=True, exist_ok=True)
@@ -58,7 +58,7 @@ class DeepSeekBrowser:
 
         self._navigate(CONFIG["DEEPSEEK_URL"])
         self._ensure_logged_in()
-        logger.success("浏览器已就绪！")
+        LOGGER.success("浏览器已就绪！")
 
     def close(self):
         if self._closed:
@@ -77,7 +77,7 @@ class DeepSeekBrowser:
             self.page.goto(url, wait_until="domcontentloaded", timeout=30000)
             time.sleep(1.5)
         except Exception as e:
-            logger.warn(f"导航警告: {e}")
+            LOGGER.warn(f"导航警告: {e}")
 
     def new_chat(self):
         # 尝试点击“新对话”按钮
@@ -95,13 +95,13 @@ class DeepSeekBrowser:
                 if el and el.is_visible():
                     el.click()
                     time.sleep(1)
-                    logger.dim("已启动新对话")
+                    LOGGER.dim("已启动新对话")
                     return
             except:
                 pass
         # 后备：导航到首页
         self._navigate(CONFIG["DEEPSEEK_URL"])
-        logger.dim("已导航到 DeepSeek 首页（新对话）")
+        LOGGER.dim("已导航到 DeepSeek 首页（新对话）")
 
     def _ensure_logged_in(self):
         time.sleep(2)
@@ -120,12 +120,12 @@ class DeepSeekBrowser:
 
     def _print_login_banner(self):
         print()
-        logger.warn("=" * 52)
-        logger.warn("🔐  需要登录")
-        logger.warn("")
-        logger.warn("1. 在浏览器窗口中登录 DeepSeek")
-        logger.warn("2. 返回此处并按下  ENTER  继续")
-        logger.warn("=" * 52)
+        LOGGER.warn("=" * 52)
+        LOGGER.warn("🔐  需要登录")
+        LOGGER.warn("")
+        LOGGER.warn("1. 在浏览器窗口中登录 DeepSeek")
+        LOGGER.warn("2. 返回此处并按下  ENTER  继续")
+        LOGGER.warn("=" * 52)
         print()
 
     def _wait_for_enter(self):
@@ -219,7 +219,7 @@ class DeepSeekBrowser:
                 break
             time.sleep(0.4)
         if not appeared:
-            logger.warn("响应可能延迟 — 继续等待...")
+            LOGGER.warn("响应可能延迟 — 继续等待...")
 
         # 阶段2：等待文本稳定
         last_text = ""
@@ -238,10 +238,10 @@ class DeepSeekBrowser:
                     stable_start = None
             # 进度
             dot = '.' * (int(time.time()) % 4)
-            logger.thinking(f"正在接收响应{dot}  ({len(text)} 字符)")
+            LOGGER.thinking(f"正在接收响应{dot}  ({len(text)} 字符)")
             time.sleep(0.5)
 
-        logger.clear_line()
+        LOGGER.clear_line()
         final = self._extract_last_message()
         return self._clean_text(final)
 
@@ -454,12 +454,12 @@ class DeepSeekBrowser:
         """确保侧边栏展开。如果侧边栏已打开则忽略，否则点击汉堡菜单按钮。"""
         # 先检查侧边栏是否已可见（通过历史列表容器是否存在且可见）
         sidebar_visible = self.page.evaluate("""
-            () => {
-                const container = document.querySelector('[class*="sidebar"], [class*="history"], [class*="conversation-list"]');
-                if (!container) return false;
-                const rect = container.getBoundingClientRect();
-                return rect.width > 0 && rect.height > 0;
-            }
+() => {
+    const container = document.querySelector('[class*="sidebar"], [class*="history"], [class*="conversation-list"]');
+    if (!container) return false;
+    const rect = container.getBoundingClientRect();
+    return rect.width > 0 && rect.height > 0;
+}
         """)
         if sidebar_visible:
             return
@@ -483,7 +483,7 @@ class DeepSeekBrowser:
                     return
             except:
                 pass
-        # logger.warn("未找到侧边栏切换按钮，可能已经展开或页面结构变化")
+        # LOGGER.warn("未找到侧边栏切换按钮，可能已经展开或页面结构变化")
 
     def list_chats(self):
         """获取侧边栏中所有对话的标题列表（按显示顺序）"""
@@ -515,8 +515,8 @@ class DeepSeekBrowser:
             link = self.page.wait_for_selector(selector, timeout=3000, state="visible")
             link.click()
             time.sleep(1.5)  # 等待页面切换
-            logger.info(f"已切换到对话：{title}")
-        except Exception as e:
+            LOGGER.info(f"已切换到对话：{title}")
+        except Exception:
             # 降级方案：遍历所有条目，用 javascript 匹配
             clicked = self.page.evaluate("""
                 (targetTitle, partial) => {
@@ -550,7 +550,7 @@ class DeepSeekBrowser:
         link.scroll_into_view_if_needed()
         link.click()
         time.sleep(1.5)
-        logger.info(f"已选择索引 {index} 的对话")
+        LOGGER.info(f"已选择索引 {index} 的对话")
 
     def get_current_chat_title(self):
         """获取当前正在查看的对话标题（从页面顶部或 URL 推断）"""
@@ -669,9 +669,9 @@ class DeepSeekBrowser:
             else:
                 return {"type": "final", "content": full_text}
 
-        except json.JSONDecodeError as e:
+        except json.JSONDecodeError:
             return {"type": "error", "message": f"JSON解析失败: " + traceback.format_exc()}
-        except Exception as e:
+        except Exception:
             return {"type": "error", "message": f"提取工具调用失败: " + traceback.format_exc()}
 
     def load_file(self, file_paths, selector=None):
@@ -723,6 +723,6 @@ class DeepSeekBrowser:
 
         # 设置文件（Playwright会自动触发 change 事件）
         self.page.set_input_files(selector, file_paths)
-        logger.info(f"已上传文件: {', '.join(file_paths)}")
+        LOGGER.info(f"已上传文件: {', '.join(file_paths)}")
         # 可选的延迟，让页面处理上传
         time.sleep(0.5)

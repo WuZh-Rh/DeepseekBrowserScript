@@ -151,9 +151,6 @@ def format_message_list(messages, limit, reply_id=None):
             name_parts.append("未知用户")
 
         # 用括号连接各部分，格式：card(nickname)(user_id)
-        display_name = "".join([f"({part})" if i > 0 or not card else part for i, part in enumerate(name_parts)])
-        # 如果 card 存在，则 card 不加括号；后续加括号
-        # 但上面的表达式复杂，简单重写：
         display_name = ""
         if card:
             display_name += card
@@ -392,8 +389,8 @@ def tool_listen_group_msg(
             data = resp.json()
             if data.get('status') != 'ok':
                 return []
-            msgs = data.get('data', {}).get('messages', [])
-            return msgs if isinstance(msgs, list) else []
+            _msgs = data.get('data', {}).get('messages', [])
+            return _msgs if isinstance(_msgs, list) else []
         except:
             return []
 

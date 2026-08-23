@@ -3,247 +3,342 @@
 #
 # @Time    : 2026/07/31 00:31
 # @Author  : Wu_RH
-# @FileName: logger.py.py
+# @FileName: logger.py
 # src/logger.py
 
+import logging
+import os
+import json
+import re
+import sys
+from logging import FileHandler, Formatter, StreamHandler
+from typing import Any, Optional, Dict, List
 from datetime import datetime
-from io import TextIOWrapper
 from pathlib import Path
-from typing import Optional
 
-# ANSI colors
-COLORS = {
-    "reset": "\033[0m",
-    "bold": "\033[1m",
-    "dim": "\033[2m",
-    "red": "\033[31m",
-    "green": "\033[32m",
-    "yellow": "\033[33m",
-    "blue": "\033[34m",
-    "magenta": "\033[35m",
-    "cyan": "\033[36m",
-    "white": "\033[37m",
-    "gray": "\033[90m",
-    "lred": "\033[91m",
-    "lgreen": "\033[92m",
-    "lyellow": "\033[93m",
-    "lblue": "\033[94m",
-    "lmagenta": "\033[95m",
-    "lcyan": "\033[96m",
+os.system("")
+
+__all__ = [
+    "LOGGER",
+    "Logger",
+    "getLogger",
+    "SELF_PATH",
+    "ANSI_COLORS",
+    "LOGGER_MASTER",
+    "trunc_display",
+    "json_preview",
+]
+
+SELF_PATH: str = os.getcwd()
+LOGGER_MASTER_NAME: str = "Logger"
+
+ANSI_COLORS: Dict[str, str] = {
+    'BLACK': '\033[30m',
+    'RED': '\033[31m',
+    'GREEN': '\033[32m',
+    'YELLOW': '\033[33m',
+    'BLUE': '\033[34m',
+    'MAGENTA': '\033[35m',
+    'CYAN': '\033[36m',
+    'WHITE': '\033[37m',
+    'BRIGHT_BLACK': '\033[90m',
+    'BRIGHT_RED': '\033[91m',
+    'BRIGHT_GREEN': '\033[92m',
+    'BRIGHT_YELLOW': '\033[93m',
+    'BRIGHT_BLUE': '\033[94m',
+    'BRIGHT_MAGENTA': '\033[95m',
+    'BRIGHT_CYAN': '\033[96m',
+    'BRIGHT_WHITE': '\033[97m',
+    'RESET': '\033[0m',
+    'BOLD': '\033[1m',
+    'DIM': '\033[2m',
+    'ITALIC': '\033[3m',
+    'UNDERLINE': '\033[4m',
+    'BLINK': '\033[5m',
+    'REVERSE': '\033[7m',
+    'HIDDEN': '\033[8m',
+    'BG_BLACK': '\033[40m',
+    'BG_RED': '\033[41m',
+    'BG_GREEN': '\033[42m',
+    'BG_YELLOW': '\033[43m',
+    'BG_BLUE': '\033[44m',
+    'BG_MAGENTA': '\033[45m',
+    'BG_CYAN': '\033[46m',
+    'BG_WHITE': '\033[47m',
+    'BG_BRIGHT_BLACK': '\033[100m',
+    'BG_BRIGHT_RED': '\033[101m',
+    'BG_BRIGHT_GREEN': '\033[102m',
+    'BG_BRIGHT_YELLOW': '\033[103m',
+    'BG_BRIGHT_BLUE': '\033[104m',
+    'BG_BRIGHT_MAGENTA': '\033[105m',
+    'BG_BRIGHT_CYAN': '\033[106m',
+    'BG_BRIGHT_WHITE': '\033[107m',
 }
 
+# ----- 添加常用小写别名（方便调用） -----
+ANSI_COLORS.update({
+    'black': ANSI_COLORS['BLACK'],
+    'red': ANSI_COLORS['RED'],
+    'green': ANSI_COLORS['GREEN'],
+    'yellow': ANSI_COLORS['YELLOW'],
+    'blue': ANSI_COLORS['BLUE'],
+    'magenta': ANSI_COLORS['MAGENTA'],
+    'cyan': ANSI_COLORS['CYAN'],
+    'white': ANSI_COLORS['WHITE'],
+    'gray': ANSI_COLORS['BRIGHT_BLACK'],
+    'grey': ANSI_COLORS['BRIGHT_BLACK'],
+    'lblack': ANSI_COLORS['BRIGHT_BLACK'],
+    'lred': ANSI_COLORS['BRIGHT_RED'],
+    'lgreen': ANSI_COLORS['BRIGHT_GREEN'],
+    'lyellow': ANSI_COLORS['BRIGHT_YELLOW'],
+    'lblue': ANSI_COLORS['BRIGHT_BLUE'],
+    'lmagenta': ANSI_COLORS['BRIGHT_MAGENTA'],
+    'lcyan': ANSI_COLORS['BRIGHT_CYAN'],
+    'lwhite': ANSI_COLORS['BRIGHT_WHITE'],
+    # 也支持大写形式，但通常我们用小写调用
+    'LGREEN': ANSI_COLORS['BRIGHT_GREEN'],
+    'LRED': ANSI_COLORS['BRIGHT_RED'],
+    'LCYAN': ANSI_COLORS['BRIGHT_CYAN'],
+    'LBLUE': ANSI_COLORS['BRIGHT_BLUE'],
+    'LYELLOW': ANSI_COLORS['BRIGHT_YELLOW'],
+    'LMAGENTA': ANSI_COLORS['BRIGHT_MAGENTA'],
+    'LWHITE': ANSI_COLORS['BRIGHT_WHITE'],
+    'GRAY': ANSI_COLORS['BRIGHT_BLACK'],
+})
 
-def c(code, text):
-    return f"{COLORS[code]}{text}{COLORS['reset']}"
+
+def c(code: str, text: str) -> str:
+    return f"{ANSI_COLORS[code.upper()]}{text}{ANSI_COLORS['RESET']}"
 
 
-def cb(code, text):
-    return f"{COLORS['bold']}{COLORS[code]}{text}{COLORS['reset']}"
+def cb(code: str, text: str) -> str:
+    return f"{ANSI_COLORS['BOLD']}{ANSI_COLORS[code.upper()]}{text}{ANSI_COLORS['RESET']}"
 
 
-def remove_colors(text):
-    import re
+def remove_colors(text: str) -> str:
     return re.sub(r'\033\[[0-9;]*m', '', text)
 
 
-def local_timestamp():
-    now = datetime.now()
-    return now.strftime("%Y-%m-%d %H:%M:%S.%f")[:-3]
+def local_timestamp() -> str:
+    return datetime.now().strftime("%Y-%m-%d %H:%M:%S.%f")[:-3]
 
 
-# 文件日志
-_log_stream: Optional[TextIOWrapper] = None
-_log_is_fixed: bool = False
+def trunc_display(s: Any, max_len: int = 400) -> str:
+    s_str: str = str(s)
+    if len(s_str) <= max_len:
+        return s_str
+    return s_str[:max_len] + c('gray', f'… (+{len(s_str) - max_len} 字符)')
 
 
-def init_log_file(
-    log_file_path,
-    is_fixed=False,
-    roll_name="",
-):
-    global _log_stream, _log_is_fixed
-    if _log_stream:
-        return
-    if not log_file_path:
-        return
+def json_preview(obj: Any, max_len: int = 350) -> str:
     try:
-        _log_is_fixed = is_fixed
-        log_file = Path(log_file_path)
-        if is_fixed:
-            # 固定文件模式
-            log_file.parent.mkdir(parents=True, exist_ok=True)
-            _log_stream = open(log_file, 'a', encoding='utf-8')
-            _log_stream.write(f"[{local_timestamp()}] === 会话开始 ===\n")
-            _log_stream.flush()
-            logger.info(f"[Logger] 日志写入固定文件: {log_file}")
-            return
-        # 滚动模式
-        log_dir = log_file.parent
-        log_dir.mkdir(parents=True, exist_ok=True)
-        # 归档旧日志
-        if log_file.exists():
-            mtime = datetime.fromtimestamp(log_file.stat().st_mtime)
-            date_str = mtime.strftime("%Y-%m-%d")
-            date_dir = log_dir / date_str
-            date_dir.mkdir(exist_ok=True)
-            # 找最大索引
-            existing = [f for f in date_dir.iterdir() if f.suffix == '.log' and f.stem.startswith(date_str)]
-            max_idx = -1
-            for f in existing:
-                parts = f.stem.split('-')
-                if len(parts) >= 2:
-                    try:
-                        idx = int(parts[-1])
-                        if idx > max_idx:
-                            max_idx = idx
-                    except:
-                        pass
-            next_idx = max_idx + 1
-            archived_name = f"{date_str}-{next_idx:04d}"
-            archived_name += (f"-{roll_name}" if roll_name else "") + ".log"
-            archived_path = date_dir / archived_name
-            log_file.rename(archived_path)
-            logger.info(f"[Logger] 已归档旧日志: {archived_name}")
-        _log_stream = open(log_file, 'a', encoding='utf-8')
-        _log_stream.write(f"[{local_timestamp()}] === 会话开始 ===\n")
-        _log_stream.flush()
-        logger.info(f"[Logger] 日志写入滚动文件: {log_file}")
-    except Exception as e:
-        logger.error(f"[Logger] 无法初始化文件日志: {e}")
-
-
-def write_to_file(message, prefix_timestamp=True):
-    if not _log_stream or message is None:
-        return
-    try:
-        ts = local_timestamp()
-        for line in str(message).splitlines():
-            if prefix_timestamp:
-                _log_stream.write(f"[{ts}] {line}\n")
-            else:
-                _log_stream.write(f"{line}\n")
-        _log_stream.flush()
-    except:
-        pass
-
-
-def trunc_display(s, max_len=400):
-    s = str(s)
-    if len(s) <= max_len:
-        return s
-    return s[:max_len] + c('gray', f'… (+{len(s) - max_len} 字符)')
-
-
-def json_preview(obj, max_len=350):
-    import json
-    s = json.dumps(obj, indent=2, ensure_ascii=False)
+        s: str = json.dumps(obj, indent=2, ensure_ascii=False)
+    except Exception:
+        s = str(obj)
     return trunc_display(s, max_len)
 
 
-class Logger:
-    @staticmethod
-    def banner():
-        msg = f"""
+def _get_archive_path(log_dir: Path, roll_name: str = "") -> Path:
+    """生成日期归档文件路径，索引自动递增，不移动任何已有文件"""
+    date_str: str = datetime.now().strftime("%Y-%m-%d")
+    date_dir: Path = log_dir / date_str
+    date_dir.mkdir(parents=True, exist_ok=True)
+    existing: List[Path] = [f for f in date_dir.iterdir() if f.suffix == '.log' and f.stem.startswith(date_str)]
+    max_idx: int = -1
+    for f in existing:
+        if not f.name.startswith(date_str):
+            continue
+        # 提取日期后的四位数字索引，不管后面有没有后缀
+        match = re.search(rf'^{date_str}-(\d{{4}})', f.name)
+        if not match:
+            continue
+        idx = int(match.group(1))
+        if idx > max_idx:
+            max_idx = idx
+
+    next_idx: int = max_idx + 1
+    name: str = f"{date_str}-{next_idx:04d}"
+    if roll_name:
+        name += f"-{roll_name}"
+    name += ".log"
+    return date_dir / name
+
+
+class PlainFileFormatter(Formatter):
+    def format(self, record: logging.LogRecord) -> str:
+        s: str = super().format(record)
+        return remove_colors(s)
+
+
+class Logger(logging.Logger):
+    def setLevel(self, level: int) -> None:
+        for handler in self.handlers:
+            if isinstance(handler, StreamHandler):
+                handler.setLevel(level)
+                break
+
+    def setFileLevel(self, level: int) -> None:
+        for handler in self.handlers:
+            if isinstance(handler, FileHandler):
+                handler.setLevel(level)
+                break
+
+    def debug(self, msg: str, *args: object, **kwargs: Any) -> None:
+        super().debug(msg, *args, **kwargs)
+        formatted: str = msg % args if args else msg
+        print(c('blue', formatted))
+
+    def info(self, msg: str, *args: object, **kwargs: Any) -> None:
+        super().info(msg, *args, **kwargs)
+        formatted: str = msg % args if args else msg
+        print(c('green', formatted))
+
+    def warning(self, msg: str, *args: object, **kwargs: Any) -> None:
+        super().warning(msg, *args, **kwargs)
+        formatted: str = msg % args if args else msg
+        print(c('yellow', formatted))
+
+    def error(self, msg: str, *args: object, **kwargs: Any) -> None:
+        super().error(msg, *args, **kwargs)
+        formatted: str = msg % args if args else msg
+        print(c('red', formatted))
+
+    def critical(self, msg: str, *args: object, **kwargs: Any) -> None:
+        super().critical(msg, *args, **kwargs)
+        formatted: str = msg % args if args else msg
+        print(c('bright_red', formatted))
+
+    def warn(self, msg: str, *args: object, **kwargs: Any) -> None:
+        self.warning(msg, *args, **kwargs)
+
+    def banner(self) -> None:
+        msg: str = f"""
 {c('cyan', '=' * 52)}
-{cb('lcyan', 'DeepSeek 浏览器代理')}
+{c('lcyan', 'DeepSeek 浏览器代理')}
 {c('gray', '通过浏览器自动化实现的 AI 编码代理')}
 {c('gray', '无需 API 密钥 — 使用 chat.deepseek.com')}
 {c('cyan', '=' * 52)}
 """
         print(msg)
-        write_to_file("BANNER:" + remove_colors(msg), False)
+        self.info("BANNER:\n" + remove_colors(msg))
 
-    @staticmethod
-    def header(msg):
-        line = '-' * 50
-        output = f"\n{c('blue', line)}\n{c('bold', '📋 ')}{cb('white', msg)}\n{c('blue', line)}\n"
+    def header(self, msg: str) -> None:
+        line: str = '-' * 50
+        output: str = f"\n{c('blue', line)}\n{c('bold', msg)}\n{c('blue', line)}\n"
         print(output)
-        write_to_file("HEADER: " + remove_colors(output), False)
+        self.info("HEADER: " + remove_colors(output))
 
-    @staticmethod
-    def info(msg):
-        out = f"{c('lblue', 'INFO ')} {msg}"
-        print(out)
-        write_to_file("INFO: " + remove_colors(msg))
+    def success(self, msg: str) -> None:
+        print(c('lgreen', msg))
+        self.info("SUCCESS: " + remove_colors(msg))
 
-    @staticmethod
-    def success(msg):
-        out = f"{c('lgreen', '  ✓ ')} {c('lgreen', msg)}"
-        print(out)
-        write_to_file("SUCCESS: " + remove_colors(msg))
+    def dim(self, msg: str) -> None:
+        print(f"{ANSI_COLORS['DIM']}{msg}{ANSI_COLORS['RESET']}")
+        self.info("DIM: " + remove_colors(msg))
 
-    @staticmethod
-    def warn(msg):
-        out = f"{c('lyellow', '  ⚠ ')} {c('lyellow', msg)}"
-        print(out)
-        write_to_file("WARN: " + remove_colors(msg))
-
-    @staticmethod
-    def error(msg):
-        out = f"{c('lred', '  ✗ ')} {c('lred', msg)}"
-        print(out)
-        write_to_file("ERROR: " + remove_colors(msg))
-
-    @staticmethod
-    def dim(msg):
-        out = f"{COLORS['dim']}    {msg}{COLORS['reset']}"
-        print(out)
-        write_to_file("DIM: " + remove_colors(msg))
-
-    @staticmethod
-    def thinking(msg):
-        import sys
-        sys.stdout.write(f"  {c('cyan', '⟳')} {c('gray', msg)}\r")
+    def thinking(self, msg: str) -> None:
+        sys.stdout.write(c('gray', msg) + '\r')
         sys.stdout.flush()
 
-    @staticmethod
-    def clear_line():
-        import sys
+    def clear_line(self) -> None:
         sys.stdout.write('\r' + ' ' * 80 + '\r')
         sys.stdout.flush()
 
-    @staticmethod
-    def tool_call(name, args):
-        output = f"\n  {cb('magenta', '⚡ 工具调用')} {c('cyan', f'→ {name}')}"
+    def tool_call(self, name: str, args: Any) -> None:
+        output: str = f"\n{c('magenta', '工具调用')} {c('cyan', f'-> {name}')}"
         print(output)
-        preview = json_preview(args)
+        preview: str = json_preview(args)
         if preview.strip():
             for line in preview.splitlines():
                 print(f"  {c('gray', line)}")
-        write_to_file("TOOL_CALL: " + remove_colors(name) + " " + str(args))
+        self.info("TOOL_CALL: " + remove_colors(name) + " " + str(args))
 
-    @staticmethod
-    def tool_result(result: str, is_error=False):
-        icon = c('lred', '  ✗ 结果:') if is_error else c('lgreen', '  ✓ 结果:')
-        color = 'lred' if is_error else 'gray'
-        print(icon)
-        lines = trunc_display(str(result), 300).splitlines()[:12]
+    def tool_result(self, result: str, is_error: bool = False) -> None:
+        color: str = 'lred' if is_error else 'gray'
+        print(c(color, "结果:"))
+        lines: List[str] = trunc_display(str(result), 300).splitlines()[:12]
         for line in lines:
             print(f"  {c(color, line)}")
         if len(str(result).splitlines()) > 12:
-            print(f"  {c('gray', '  … （为显示而截断）')}")
+            print(c('gray', '  … （为显示而截断）'))
         print()
-        write_to_file("TOOL_RESULT (" + ("ERROR" if is_error else "SUCCESS") + "): " + remove_colors(str(result)[:500]))
+        status: str = "ERROR" if is_error else "SUCCESS"
+        self.info("TOOL_RESULT (" + status + "): " + remove_colors(str(result)[:500]))
 
-    @staticmethod
-    def final_output(msg):
-        line = '━' * 50
-        output = f"\n{c('lgreen', line)}\n{cb('lgreen', '✅  任务完成')}\n{c('lgreen', line)}\n\n{msg}\n"
+    def final_output(self, msg: str) -> None:
+        line: str = '━' * 50
+        output: str = f"\n{c('lgreen', line)}\n{c('lgreen', '任务完成')}\n{c('lgreen', line)}\n\n{msg}\n"
         print(output)
-        write_to_file("FINAL: " + remove_colors(output), False)
+        self.info("FINAL: " + remove_colors(output))
 
-    @staticmethod
-    def separator(label=''):
-        pad = f" {label} " if label else ""
-        out = f"\n{c('gray', '·' * 20 + pad + '·' * 20)}\n"
+    def separator(self, label: str = '') -> None:
+        pad: str = f" {label} " if label else ""
+        out: str = f"\n{c('gray', '-' * 20 + pad + '-' * 20)}\n"
         print(out)
-        write_to_file("SEPARATOR: " + remove_colors(out), False)
+        self.info("SEPARATOR: " + remove_colors(out))
 
-    @staticmethod
-    def iteration(n, max_n):
-        out = f"\n{c('gray', '  ┄')} {c('dim', f'第 {n}/{max_n} 步')} {c('gray', '┄')}"
-        print(out)
-        write_to_file("ITERATION: " + remove_colors(out), False)
+    def iteration(self, n: int, max_n: int) -> None:
+        print(c('dim', f'第 {n}/{max_n} 步'))
+        self.info("ITERATION: " + remove_colors(f'第 {n}/{max_n} 步'))
 
 
-logger: Logger = Logger()
+class LoggerMaster:
+    logger_map: Dict[str, Logger] = {}
+
+    def __init__(self) -> None:
+        self.DEFAULT_CONFIG: Dict[str, Any] = {
+            "format": "%(asctime)s   %(levelname)s\t[%(name)s]:\t%(message)s",
+            "datefmt": "%Y-%m-%d %H:%M:%S",
+            "logfile": f"{SELF_PATH}/log/latest.log",
+            "level": logging.INFO,
+            "file_level": logging.INFO,
+            "roll_name": "",  # 归档文件名后缀，例如 "backend"
+        }
+
+    def getLogger(
+        self,
+        name: str = LOGGER_MASTER_NAME,
+        logger_config: Optional[Dict[str, Any]] = None
+    ) -> Logger:
+        if name in self.logger_map:
+            return self.logger_map[name]
+        if logger_config is not None:
+            self.DEFAULT_CONFIG.update(logger_config)
+        config: Dict[str, Any] = self.DEFAULT_CONFIG.copy()
+
+        log_path: str = config["logfile"]
+        log_dir: Path = Path(log_path).parent
+        log_dir.mkdir(parents=True, exist_ok=True)
+
+        logger: Logger = Logger(name)
+        logger.setLevel(config["level"])
+
+        # ----- 文件处理器 1: logfile (每次启动清空，mode='w') -----
+        file_handler_main: FileHandler = FileHandler(log_path, mode='w', encoding='utf-8')
+        file_handler_main.setLevel(config["file_level"])
+        formatter_main: PlainFileFormatter = PlainFileFormatter(
+            config["format"], datefmt=config["datefmt"]
+        )
+        file_handler_main.setFormatter(formatter_main)
+        logger.addHandler(file_handler_main)
+
+        # ----- 文件处理器 2: 日期归档文件 (追加，mode='a') -----
+        archive_path: Path = _get_archive_path(log_dir, config.get("roll_name", ""))
+        file_handler_archive: FileHandler = FileHandler(str(archive_path), mode='a', encoding='utf-8')
+        file_handler_archive.setLevel(config["file_level"])
+        formatter_archive: PlainFileFormatter = PlainFileFormatter(
+            config["format"], datefmt=config["datefmt"]
+        )
+        file_handler_archive.setFormatter(formatter_archive)
+        logger.addHandler(file_handler_archive)
+
+        # ----- 控制台输出由 Logger 类的 print 方法实现，不添加 StreamHandler -----
+
+        logger.info("=== 会话开始 ===")
+        self.logger_map[name] = logger
+        return logger
+
+
+LOGGER_MASTER: LoggerMaster = LoggerMaster()
+getLogger = LOGGER_MASTER.getLogger
+LOGGER: Optional[Logger] = None

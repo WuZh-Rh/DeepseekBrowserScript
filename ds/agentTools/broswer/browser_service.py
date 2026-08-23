@@ -24,7 +24,7 @@ try:
 except RuntimeError:
     pass
 
-from playwright.sync_api import sync_playwright, Page
+from playwright.sync_api import sync_playwright, Page, Browser
 
 from ds.config import CONFIG
 
@@ -38,7 +38,7 @@ class BrowserService:
         self.playwright = None
         self.context = None
         self.page: Optional[Page] = None
-        self.browser = None
+        self.browser: Optional[Browser] = None
         self._initialized = False
         self._custom_js = {}
         self._running = True
@@ -56,7 +56,8 @@ class BrowserService:
             user_data_dir=str(session_dir),
             headless=CONFIG["HEADLESS"],
             viewport={"width": 1280, "height": 900},
-            user_agent="Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+            user_agent="Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 "
+                       "Safari/537.36",
             args=[
                 "--disable-blink-features=AutomationControlled",
                 "--no-first-run",
@@ -84,13 +85,11 @@ class BrowserService:
         if not self.browser:
             return
         try:
-            proc = self.browser._impl_obj._connection._transport._proc
-            if proc and hasattr(proc, 'pid'):
-                pid = proc.pid
-                if sys.platform == "win32":
-                    subprocess.run(["taskkill", "/F", "/T", "/PID", str(pid)], capture_output=True)
-                else:
-                    os.kill(pid, signal.SIGKILL)
+            pid = self.browser._impl_obj._connection._transport._proc.pid
+            if sys.platform == "win32":
+                subprocess.run(["taskkill", "/F", "/T", "/PID", str(pid)], capture_output=True)
+            else:
+                os.kill(pid, signal.SIGKILL)
         except Exception:
             pass
         self.browser = None
@@ -260,22 +259,11 @@ class BrowserService:
                     break
                 result = self._execute_command(cmd, args)
                 self.result_queue.put(result)
-            except Exception as e:
+            except Exception:
                 # 超时或其他异常，继续
                 continue
 
         self.close()
-
-
-def main():
-    """子进程入口：从环境变量获取队列句柄"""
-    import multiprocessing
-    # 从环境变量获取队列的地址（实际传递的是队列对象，但 multiprocessing 会自动序列化）
-    # 我们在主进程直接创建队列并作为参数传递给 Process，这里使用全局变量可能更简单。
-    # 但为了方便，我们采用标准做法：主进程创建队列，通过 Process 构造函数传递。
-    # 然而这里我们只作为服务入口，由主进程直接实例化并传入队列。
-    # 因此此函数不会直接运行，而是由主进程调用 BrowserService.run()
-    pass
 
 
 if __name__ == "__main__":

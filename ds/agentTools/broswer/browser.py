@@ -100,12 +100,26 @@ TOOLS["browser_execute_js"] = {
     "description": "在浏览器中执行自定义 JavaScript 代码，并返回结果。可保存为可复用脚本。(使用playwright的Page.evaluate实现)",
     "parameters": {
         "js_code": {"type": "string", "required": True, "description": "要执行的 JavaScript 代码"},
-        "save_as": {"type": "string", "required": False, "description": "可选，保存此脚本的名称"},
+        "save_as": {
+            "type": "string", "required": False,
+            "description": "可选，保存此脚本的名称(后续可使用browser_run_saved_js来调用)"
+        },
         "timeout": {"type": "number", "required": False, "description": "超时时间（秒），默认 30"},
         "args": {"type": "object", "required": False,
                  "description": "传递给 JS 代码的参数对象，可在 JS 中通过 arguments[0] 或函数形参获取"},
     },
     "execute": tool_browser_execute_js,
+}
+
+TOOLS["browser_run_saved_js"] = {
+    "description": "运行之前取了别名的 JavaScript 代码（按名称调用）。",
+    "parameters": {
+        "name": {"type": "string", "required": True, "description": "之前browser_execute_js保存的别名"},
+        "timeout": {"type": "number", "required": False, "description": "超时时间（秒），默认 30"},
+        "args": {"type": "object", "required": False,
+                 "description": "传递给 JS 代码的参数对象，可在 JS 中通过 arguments[0] 获取"},
+    },
+    "execute": tool_browser_run_saved_js,
 }
 
 TOOLS["browser_json_snapshot"] = {
@@ -136,17 +150,6 @@ TOOLS["browser_clear_session"] = {
     "description": "清空当前浏览器会话（删除所有持久化数据：cookies、localStorage、sessionStorage 等），下次调用浏览器工具时会创建全新的会话环境。",
     "parameters": {},
     "execute": tool_browser_clear_session,
-}
-
-TOOLS["browser_run_saved_js"] = {
-    "description": "运行之前保存的 JavaScript 代码（按名称调用）。",
-    "parameters": {
-        "name": {"type": "string", "required": True, "description": "保存时的名称"},
-        "timeout": {"type": "number", "required": False, "description": "超时时间（秒），默认 30"},
-        "args": {"type": "object", "required": False,
-                 "description": "传递给 JS 代码的参数对象，可在 JS 中通过 arguments[0] 获取"},
-    },
-    "execute": tool_browser_run_saved_js,
 }
 
 TOOLS["browser_click"] = {

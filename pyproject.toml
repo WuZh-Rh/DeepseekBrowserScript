@@ -1,0 +1,21 @@
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "dsBrowser"
+version = "0.1.0"
+description = "DeepSeek Browser Automation Agent"
+authors = [{name = "Wu_RH"}]
+readme = "README.md"   # 如果有的话，没有可以删除
+requires-python = ">=3.8"
+dependencies = [
+    "playwright>=1.40.0",
+    "requests>=2.31.0",
+    "colorama>=0.4.6",
+]
+# 或者直接动态读取 requirements.txt（下面有说明）
+
+#[project.scripts]
+# 如果有命令行入口可以添加，例如:
+# ds = "ds.__main__:main"

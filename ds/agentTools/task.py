@@ -158,15 +158,15 @@ def tool_run_test():
             text=True,
             env={**os.environ, "DSA_LOG_FILE": os.environ.get("DSA_LOG_FILE", "")}
         )
+        output = result.stdout + "\n" + result.stderr
+        lines = output.splitlines()
+        last_hundred = "\n".join(lines[-100:])
         if result.returncode == 0:
-            return None
+            return {"success": True, "data": f"测试成功（退出码 {result.returncode}）：\n{last_hundred}"}
         else:
-            output = result.stdout + "\n" + result.stderr
-            lines = output.splitlines()
-            last_hundred = "\n".join(lines[-100:])
-            return f"测试失败（退出码 {result.returncode}）：\n{last_hundred}"
+            return {"success": False, "data": f"测试失败（退出码 {result.returncode}）：\n{last_hundred}"}
     except Exception as e:
-        return f"测试执行异常: {e}"
+        return {"success": False, "data": f"测试执行异常: {e}"}
 
 
 TOOLS["run_test"] = {

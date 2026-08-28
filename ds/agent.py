@@ -179,7 +179,7 @@ class DeepSeekAgent:
 
                     # 更新状态
                     if name == "run_test":
-                        if result and result.startswith("测试失败"):
+                        if not result_success:
                             test_failed = True
                             other_tool_called_after_test = False
                         else:

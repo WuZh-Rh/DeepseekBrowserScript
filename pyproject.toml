@@ -7,15 +7,17 @@ name = "dsBrowser"
 version = "0.1.0"
 description = "DeepSeek Browser Automation Agent"
 authors = [{name = "Wu_RH"}]
-readme = "README.md"   # 如果有的话，没有可以删除
+# 注释掉或删除 readme 行（因为没有 README.md）
+# readme = "README.md"
 requires-python = ">=3.8"
 dependencies = [
     "playwright>=1.40.0",
     "requests>=2.31.0",
     "colorama>=0.4.6",
 ]
-# 或者直接动态读取 requirements.txt（下面有说明）
 
-#[project.scripts]
-# 如果有命令行入口可以添加，例如:
-# ds = "ds.__main__:main"
+[tool.setuptools.packages.find]
+# 只包含 ds 包及其子包，排除其他顶级目录
+include = ["ds*"]
+# 或者显式排除非包目录
+# exclude = ["logs*", "prompt*", "session*"]

@@ -5,7 +5,7 @@
 # @Author  : Wu_RH
 # @FileName: logger.py
 # src/logger.py
-
+import atexit
 import logging
 import os
 import json
@@ -294,6 +294,8 @@ class LoggerMaster:
             "file_level": logging.INFO,
             "roll_name": "",  # 归档文件名后缀，例如 "backend"
         }
+        self._main_handlers: Dict[str, FileHandler] = {}
+        atexit.register(self.shutdown)  # 程序退出时自动清理
 
     def getLogger(
         self,
@@ -321,6 +323,7 @@ class LoggerMaster:
         )
         file_handler_main.setFormatter(formatter_main)
         logger.addHandler(file_handler_main)
+        self._main_handlers[name] = file_handler_main  # 记录
 
         # ----- 文件处理器 2: 日期归档文件 (追加，mode='a') -----
         archive_path: Path = _get_archive_path(log_dir, config.get("roll_name", ""))
@@ -337,6 +340,19 @@ class LoggerMaster:
         logger.info("=== 会话开始 ===")
         self.logger_map[name] = logger
         return logger
+
+    def shutdown(self) -> None:
+        """清空所有非时间戳的日志文件（latest.log）"""
+        for name, handler in self._main_handlers.items():
+            try:
+                handler.flush()
+                # 获取文件描述符并截断
+                with open(handler.baseFilename, 'r+') as f:
+                    f.truncate(0)
+                # 也可直接使用 handler.stream.truncate(0)，但需确保流存在
+            except Exception as e:
+                # 容错，防止退出时因文件权限等问题报错
+                print(f"清空日志文件 {handler.baseFilename} 失败: {e}")
 
 
 LOGGER_MASTER: LoggerMaster = LoggerMaster()

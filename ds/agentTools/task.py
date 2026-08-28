@@ -4,6 +4,7 @@
 # @Time    : 2026/07/31 02:14
 # @Author  : Wu_RH
 # @FileName: task.py
+import atexit
 import os
 import signal
 import subprocess
@@ -11,9 +12,74 @@ import sys
 import threading
 import time
 from pathlib import Path
+import ctypes
+from ctypes import wintypes
 
 from ds.agentTools import TOOLS
 from ds.config import CONFIG
+
+# ---------- Windows Job Object 管理（所有后台进程共享同一个作业） ----------
+_job_handle = None
+_job_initialized = False
+
+# ---------- 后台进程管理（后备清理） ----------
+_background_processes = []
+_atexit_registered = False
+
+
+def _cleanup_background_processes():
+    for p in _background_processes:
+        if p.poll() is None:
+            _kill_process_tree(p, p.pid)
+
+
+class _JOBOBJECT_BASIC_LIMIT_INFORMATION(ctypes.Structure):
+    _fields_ = [
+        ("PerProcessUserTimeLimit", wintypes.LARGE_INTEGER),
+        ("PerJobUserTimeLimit", wintypes.LARGE_INTEGER),
+        ("LimitFlags", wintypes.DWORD),
+        ("MinimumWorkingSetSize", ctypes.c_size_t),
+        ("MaximumWorkingSetSize", ctypes.c_size_t),
+        ("ActiveProcessLimit", wintypes.DWORD),
+        ("Affinity", ctypes.c_size_t),
+        ("PriorityClass", wintypes.DWORD),
+        ("SchedulingClass", wintypes.DWORD),
+    ]
+
+
+def _init_job_object():
+    global _job_handle, _job_initialized
+    if _job_initialized or sys.platform != "win32":
+        return
+    _job_initialized = True
+
+    kernel32 = ctypes.windll.kernel32
+    _job_handle = kernel32.CreateJobObjectW(None, None)
+    if not _job_handle:
+        return
+
+    # 必须显式清零所有字段，否则 SetInformationJobObject 可能失败
+    info = _JOBOBJECT_BASIC_LIMIT_INFORMATION()
+    info.PerProcessUserTimeLimit = 0
+    info.PerJobUserTimeLimit = 0
+    info.LimitFlags = 0x2000  # JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE
+    info.MinimumWorkingSetSize = 0
+    info.MaximumWorkingSetSize = 0
+    info.ActiveProcessLimit = 0
+    info.Affinity = 0
+    info.PriorityClass = 0
+    info.SchedulingClass = 0
+
+    result = kernel32.SetInformationJobObject(
+        _job_handle,
+        2,  # JobObjectBasicLimitInformation
+        ctypes.byref(info),
+        ctypes.sizeof(info)
+    )
+    if not result:
+        # 失败则释放句柄，并置 None，此时会降级到 atexit 清理
+        kernel32.CloseHandle(_job_handle)
+        _job_handle = None
 
 
 def resolve_path(file_path):
@@ -158,7 +224,34 @@ def tool_run_command(command, cwd=None, timeout=60, env=None, wait=True):
 
         # 如果不等待，则直接返回（不启动定时器，不调用 communicate）
         if not wait:
-            # 短暂等待确保进程启动，然后返回 PID
+            # 使用作业对象（Windows 强制终止时清理）
+            if sys.platform == "win32":
+                _init_job_object()
+                if _job_handle:
+                    kernel32 = ctypes.windll.kernel32
+                    pid = process.pid
+                    # 必须拥有 PROCESS_SET_QUOTA (0x0100) 和 PROCESS_TERMINATE (0x0001)
+                    desired = 0x0100 | 0x0001 | 0x0400  # 含 QUERY_INFORMATION 便于调试
+                    handle = kernel32.OpenProcess(desired, False, pid)
+                    if handle:
+                        ret = kernel32.AssignProcessToJobObject(_job_handle, handle)
+                        kernel32.CloseHandle(handle)
+                        # 若 ret=0，作业对象分配失败，但 atexit 会兜底
+                        if not ret:
+                            # 可选：记录日志，不影响执行
+                            from ds.logger import LOGGER
+                            LOGGER.warn(f"AssignProcessToJobObject 失败 (PID: {pid})，将依赖 atexit 清理")
+                    else:
+                        # 无法打开进程句柄，静默忽略
+                        pass
+
+            # 后备清理：父进程正常退出时（含 Ctrl+C）杀死所有后台进程
+            _background_processes.append(process)
+            global _atexit_registered
+            if not _atexit_registered:
+                atexit.register(_cleanup_background_processes)
+                _atexit_registered = True
+
             time.sleep(0.2)
             return f"后台命令已启动 (PID: {process.pid})"
 
@@ -259,3 +352,14 @@ TOOLS["abort_task"] = {
     },
     "execute": tool_abort_task,
 }
+
+if __name__ == "__main__":
+    def main():
+        result = tool_run_command(
+            "ping -t 127.0.0.1", wait=False
+        )
+        print(result)
+        print(result)
+
+    main()
+

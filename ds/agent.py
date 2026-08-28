@@ -122,7 +122,7 @@ class DeepSeekAgent:
             LOGGER.iteration(iter_num, max_iter)
 
             try:
-                raw_response = self.browser.wait_for_response()
+                raw_response = self.browser.wait_for_response(self.conversation)
             except Exception:
                 return {"data": {"content": traceback.format_exc()}, "completed": False}
             if not raw_response or not raw_response.strip():
@@ -132,7 +132,7 @@ class DeepSeekAgent:
 
             if CONFIG["DEBUG"]:
                 LOGGER.dim(f"--- 原始响应（{len(raw_response)} 字符）---")
-                LOGGER.dim(raw_response[:400])
+                LOGGER.dim(raw_response[:1000])
 
             self.conversation.add_assistant_message(raw_response)
 

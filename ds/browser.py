@@ -13,6 +13,7 @@ from playwright.sync_api import sync_playwright
 from pathlib import Path
 from .config import CONFIG
 from .logger import LOGGER
+from .prompt import ConversationManager
 
 
 class DeepSeekBrowser:
@@ -203,7 +204,7 @@ class DeepSeekBrowser:
                 pass
         return False
 
-    def wait_for_response(self):
+    def wait_for_response(self, conversation: ConversationManager):
         def click_retry():
             return self.page.evaluate("""
                 () => {
@@ -262,6 +263,8 @@ class DeepSeekBrowser:
         stable_start = None
         while time.time() - start < timeout:
             text = self._extract_last_message()
+            if text in [i["content"] for i in conversation.messages]:
+                continue
             if text != last_text:
                 last_text = text
                 stable_start = None
@@ -279,7 +282,7 @@ class DeepSeekBrowser:
 
         LOGGER.clear_line()
         final = self._extract_last_message()
-        return self._clean_text(final)
+        return final
 
     def _get_message_count(self):
         return self.page.evaluate("""
@@ -303,78 +306,23 @@ class DeepSeekBrowser:
     def _extract_last_message(self):
         return self.page.evaluate("""
             () => {
-                function getFullText(el) {
-                    if (!el) return '';
-                    let result = '';
-                    function walk(node) {
-                        if (node.nodeType === Node.TEXT_NODE) {
-                            result += node.textContent;
-                            return;
-                        }
-                        if (node.nodeType !== Node.ELEMENT_NODE) return;
-                        const tag = node.tagName.toLowerCase();
-                        if (tag === 'pre') {
-                            const codeEl = node.querySelector('code');
-                            if (codeEl) {
-                                const cls = codeEl.className || '';
-                                const lang = (cls.match(/language-(\\S+)/) || [])[1] || '';
-                                const body = codeEl.textContent || '';
-                                result += '\\n```' + lang + '\\n' + body + '\\n```\\n';
-                            } else {
-                                result += '\\n```\\n' + node.textContent + '\\n```\\n';
-                            }
-                            return;
-                        }
-                        if (tag === 'code') {
-                            const parentTag = node.parentElement?.tagName?.toLowerCase() || '';
-                            if (parentTag !== 'pre') {
-                                result += '`' + node.textContent + '`';
-                            }
-                            return;
-                        }
-                        for (const child of node.childNodes) walk(child);
-                        if (['p','div','li','br','h1','h2','h3','h4','h5','h6'].includes(tag)) {
-                            result += '\\n';
-                        }
-                    }
-                    walk(el);
-                    return result.trim();
+                const thinks = document.querySelectorAll('.ds-think-content');
+                if (!thinks.length) return '';
+                const thinkEl = thinks[thinks.length - 1];
+                const msgEl = thinkEl.closest('.ds-message, [data-role="assistant"]');
+                if (!msgEl) return thinkEl.textContent.trim();
+                const thinking = thinkEl.textContent.trim();
+                const clone = msgEl.cloneNode(true);
+                const ct = clone.querySelector('.ds-think-content');
+                if (ct) ct.remove();
+                const answer = clone.textContent.trim();
+                if (thinking && answer) {
+                    return '【思考】\\n' + thinking + '\\n\\n【输出】\\n' + answer;
+                } else if (thinking) {
+                    return thinking;
+                } else {
+                    return answer;
                 }
-                function isAssistant(el) {
-                    const cls = el.className || '';
-                    if (cls.includes('ds-assistant-message-main-content')) return true;
-                    if (el.getAttribute('data-role') === 'assistant') return true;
-                    if (cls.includes('assistant') && !cls.includes('user')) return true;
-                    return false;
-                }
-                function isUserContent(text) {
-                    return text.includes('[工具结果结束]');
-                }
-                // 优先精确选择器
-                const primary = ['.ds-assistant-message-main-content', '[data-role="assistant"]'];
-                for (const sel of primary) {
-                    const els = document.querySelectorAll(sel);
-                    if (els.length) {
-                        const el = els[els.length - 1];
-                        const text = el.innerText || '';
-                        if (isAssistant(el) && !isUserContent(text) && text.length > 5) {
-                            return getFullText(el);
-                        }
-                    }
-                }
-                // 后备
-                const allBlocks = document.querySelectorAll('[class*="message"]');
-                const candidates = [];
-                for (const el of allBlocks) {
-                    const text = el.innerText || '';
-                    if (isAssistant(el) && !isUserContent(text) && text.length > 10) {
-                        candidates.push(el);
-                    }
-                }
-                if (candidates.length) {
-                    return getFullText(candidates[candidates.length - 1]);
-                }
-                return '';
             }
         """)
 
@@ -436,20 +384,6 @@ class DeepSeekBrowser:
                 return false;
             }
         """)
-
-    def _clean_text(self, text):
-        if not text:
-            return ""
-        import re
-        # 移除思考块
-        text = re.sub(r'<think>[\s\S]*?</think>\n?', '', text, flags=re.I)
-        # 移除 Thinking 头部
-        text = re.sub(r'^Thinking\.{0,3}\n[\s\S]*?\n\n', '', text, flags=re.M)
-        # 移除复制按钮残留
-        text = re.sub(r'^\d+(?:Copy|Run|Insert|Edit)\b.*$', '', text, flags=re.M)
-        # 压缩空行
-        text = re.sub(r'\n{3,}', '\n\n', text)
-        return text.strip()
 
     def _get_prompt_texts(self):
         """

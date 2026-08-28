@@ -16,8 +16,8 @@ DEFAULT_CONFIG = {
     "DEEPSEEK_URL": "https://chat.deepseek.com",
     "SESSION_DIR": str(SELF_PATH / "session" / "session"),
     "HEADLESS": False,
-    "RESPONSE_TIMEOUT": 180_000_000,      # 毫秒
-    "STABLE_DELAY": 2500,            # 毫秒
+    "RESPONSE_TIMEOUT": 1_000_000,      # 毫秒
+    "STABLE_DELAY": 10_000,            # 毫秒
     "SEND_DELAY": 400,               # 毫秒
     "MAX_ITERATIONS": 300,
     "WORKING_DIR": os.getcwd(),

@@ -9,6 +9,7 @@ import signal
 import subprocess
 import sys
 import threading
+import time
 from pathlib import Path
 
 from ds.agentTools import TOOLS
@@ -59,8 +60,65 @@ def _kill_process_tree(process, pid):
             process.kill()
 
 
+def _fix_windows_start_command(command):
+    """
+    在 Windows 下自动修复 start 命令：若命令以 'start' 开头且缺少标题参数，
+    则在 /B 后插入空标题 ""，避免被误解为窗口标题。
+    """
+    if sys.platform != "win32":
+        return command
+
+    # 分割命令（保留引号）
+    import shlex
+    parts = shlex.split(command, posix=False)
+    if not parts or parts[0].lower() != "start":
+        return command
+
+    # 如果命令只有 "start"，或已经带有标题（以非选项开头），不做强制插入
+    # 但为了安全，统一在第一个选项之后插入空标题
+    # 查找第一个选项（以 / 或 - 开头）
+    opt_index = -1
+    for i, part in enumerate(parts[1:], start=1):
+        if part.startswith('/') or part.startswith('-'):
+            opt_index = i
+            break
+
+    if opt_index == -1:
+        # 没有选项：直接插入空标题在命令前
+        parts.insert(1, "")
+    else:
+        # 在选项之后插入空标题（如果该位置已经有一个参数且不是选项，则认为是已有标题，不覆盖）
+        # 但为保险，仍插入空标题（因为已有的可能被误解）
+        # 检查 opt_index+1 是否越界，或下一个参数不是选项
+        if len(parts) <= opt_index + 1:
+            parts.insert(opt_index + 1, "")
+        else:
+            next_part = parts[opt_index + 1]
+            # 如果下一个参数不是选项，则它可能被误认为标题，我们强制插入空标题并后移
+            if not (next_part.startswith('/') or next_part.startswith('-')):
+                parts.insert(opt_index + 1, "")
+            else:
+                # 如果下一个参数是选项，则说明后面没有标题，直接插入空标题
+                parts.insert(opt_index + 1, "")
+
+    return " ".join(parts)
+
+
 # 11. run_command
-def tool_run_command(command, cwd=None, timeout=60, env=None):
+def tool_run_command(command, cwd=None, timeout=60, env=None, wait=True):
+    """
+    执行 shell 命令并返回其输出。默认在工作目录中运行。
+
+    新增参数：
+        wait (bool): 是否等待命令结束并获取输出。
+                     若为 False，则命令在后台运行（用户需自行保证命令能后台执行），
+                     工具立即返回启动信息，不捕获输出也不超时。
+                     默认为 True，保持原有行为。
+    """
+    # 自动修复 Windows start 命令
+    if sys.platform == "win32":
+        command = _fix_windows_start_command(command)
+
     work_dir = resolve_path(cwd) if cwd else CONFIG["WORKING_DIR"]
     env_vars = {**os.environ, **(env or {})}
     process = None
@@ -73,7 +131,7 @@ def tool_run_command(command, cwd=None, timeout=60, env=None):
             _kill_process_tree(process, process.pid)
 
     try:
-        # 创建进程组（Unix: start_new_session, Windows: CREATE_NEW_PROCESS_GROUP）
+        # 创建进程
         if sys.platform == "win32":
             creation_flags = subprocess.CREATE_NEW_PROCESS_GROUP
             process = subprocess.Popen(
@@ -95,10 +153,16 @@ def tool_run_command(command, cwd=None, timeout=60, env=None):
                 stderr=subprocess.PIPE,
                 text=True,
                 env=env_vars,
-                start_new_session=True,   # 创建新会话，便于 killpg
+                start_new_session=True,
             )
 
-        # 启动超时定时器（直接强杀，不留情面）
+        # 如果不等待，则直接返回（不启动定时器，不调用 communicate）
+        if not wait:
+            # 短暂等待确保进程启动，然后返回 PID
+            time.sleep(0.2)
+            return f"后台命令已启动 (PID: {process.pid})"
+
+        # 启动超时定时器
         timer = threading.Timer(timeout, force_kill)
         timer.daemon = True
         timer.start()
@@ -109,7 +173,8 @@ def tool_run_command(command, cwd=None, timeout=60, env=None):
 
         # 若因超时而强杀，抛出异常
         if timed_out.is_set():
-            raise RuntimeError(f"命令执行超时（{timeout} 秒），已被强制终止")
+            output = stdout + stderr
+            raise RuntimeError(f"最后输出：\n{truncate(output or '无输出')}\n命令执行超时（{timeout} 秒），已被强制终止")
 
         output = stdout + stderr
         if process.returncode != 0:
@@ -122,18 +187,21 @@ def tool_run_command(command, cwd=None, timeout=60, env=None):
         raise RuntimeError(f"命令执行错误: {e}")
 
     finally:
-        # 确保进程被清理（若因异常未终止）
-        if process and process.poll() is None:
+        # 确保进程被清理（若因异常未终止且 wait=True 或进程还在运行）
+        if wait and process and process.poll() is None:
             _kill_process_tree(process, process.pid)
+        # 若 wait=False，不清理，让进程在后台继续
 
 
+# ===== 更新 TOOLS["run_command"] 定义 =====
 TOOLS["run_command"] = {
-    "description": "执行 shell 命令并返回其输出。默认在工作目录中运行。",
+    "description": "执行 shell 命令并返回其输出。默认在工作目录中运行。若设置 wait=False，则命令在后台运行（仅适用于 Windows 的 start /B 或 Unix 的 & 方式），不等待结果。",
     "parameters": {
         "command": {"type": "string", "required": True, "description": "要执行的 shell 命令"},
         "cwd": {"type": "string", "required": False, "description": "命令的工作目录"},
-        "timeout": {"type": "number", "required": False, "description": "超时时间（秒），默认 60"},
+        "timeout": {"type": "number", "required": False, "description": "超时时间（秒），默认 60，仅当 wait=True 时有效"},
         "env": {"type": "object", "required": False, "description": "额外的环境变量（键值对）"},
+        "wait": {"type": "boolean", "required": False, "description": "是否等待命令完成并返回输出，默认 True。设为 False 时命令后台运行，立即返回。"},
     },
     "execute": tool_run_command,
 }

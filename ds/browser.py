@@ -728,7 +728,7 @@ class DeepSeekBrowser:
                 return {"type": "final", "content": full_text}
 
         except json.JSONDecodeError:
-            return {"type": "error", "message": f"JSON解析失败: " + traceback.format_exc()}
+            return {"type": "error", "message": f"调用工具失败[JSON解析失败]: " + traceback.format_exc()}
         except Exception:
             return {"type": "error", "message": f"提取工具调用失败: " + traceback.format_exc()}
 

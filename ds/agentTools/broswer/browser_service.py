@@ -17,7 +17,7 @@ from pathlib import Path
 
 # 修复 asyncio 问题（服务内部不受主进程影响，但仍做清除）
 import asyncio
-from typing import Optional
+from typing import Optional, List, Tuple
 
 try:
     asyncio.set_event_loop(None)
@@ -37,15 +37,17 @@ class BrowserService:
         self.result_queue = result_queue
         self.playwright = None
         self.context = None
-        self.page: Optional[Page] = None
         self.browser: Optional[Browser] = None
         self._initialized = False
         self._custom_js = {}
         self._running = True
-        self.pages = []          # 存储 (page_id, page) 元组
-        self.page_id_counter = 0
-        self.current_page_id = None   # 当前活动页面 ID
 
+        # ----- 页面管理 -----
+        self.pages: List[Tuple[int, Page]] = []   # (page_id, page)
+        self.page_id_counter = 0
+        self.current_page_id: Optional[int] = None
+
+    # ---------- 启动与初始化 ----------
     def _launch(self):
         """启动浏览器（同步 API）"""
         if self._initialized:
@@ -71,30 +73,46 @@ class BrowserService:
             ignore_default_args=["--enable-automation"],
         )
 
-        if self.context.pages:
-            self.page = self.context.pages[0]
+        # 初始化页面列表
+        self.pages = []
+        for i, p in enumerate(self.context.pages):
+            self.pages.append((i, p))
+        if not self.pages:
+            # 无页面则创建第一个
+            new_page = self.context.new_page()
+            self.pages.append((0, new_page))
+            self.current_page_id = 0
         else:
-            self.page = self.context.new_page()
+            self.current_page_id = self.pages[0][0]
+        self.page_id_counter = len(self.pages)
 
-        self.page.add_init_script("""
-            Object.defineProperty(navigator, 'webdriver', { get: () => false });
-        """)
+        # 注入脚本隐藏自动化特征（所有页面共享）
+        for _, page in self.pages:
+            page.add_init_script("""
+                Object.defineProperty(navigator, 'webdriver', { get: () => false });
+            """)
 
         self.browser = self.context.browser
         self._initialized = True
 
-        for i, p in enumerate(self.context.pages):
-            self.pages.append((i, p))
+    def _get_current_page(self) -> Page:
+        """根据 current_page_id 返回页面实例，若无效则回退到第一个页面。自包含启动。"""
+        # 确保浏览器已启动
+        self._launch()
+
+        if self.current_page_id is not None:
+            for pid, page in self.pages:
+                if pid == self.current_page_id:
+                    return page
+        # 回退到第一个页面
         if self.pages:
-            self.page_id_counter = len(self.pages)  # 下一个 id
-            self.current_page_id = 0
-            self.page = self.pages[0][1]
-        else:
-            # 若无页面，则创建一个
-            self.page = self.context.new_page()
-            self.pages.append((0, self.page))
-            self.current_page_id = 0
-            self.page_id_counter = 1
+            self.current_page_id = self.pages[0][0]
+            return self.pages[0][1]
+        # 极端情况：无页面（应该不会发生），创建一个
+        new_page = self.context.new_page()
+        self.pages.append((0, new_page))
+        self.current_page_id = 0
+        return new_page
 
     def _kill_browser(self):
         """强制终止浏览器进程"""
@@ -110,11 +128,15 @@ class BrowserService:
             pass
         self.browser = None
         self.context = None
-        self.page = None
+        self.pages = []
+        self.current_page_id = None
         self._initialized = False
 
+    # ---------- 命令调度 ----------
     def _execute_command(self, cmd, args):
         """执行命令并返回结果"""
+        # 确保浏览器已启动（双重保险，但 _get_current_page 也会自行启动）
+        self._launch()
         method = getattr(self, f"_cmd_{cmd}", None)
         if method is None:
             return {"error": f"未知命令: {cmd}"}
@@ -124,14 +146,9 @@ class BrowserService:
         except Exception as e:
             return {"error": f"命令执行错误: {e}", "traceback": traceback.format_exc()}
 
-    # ---------- 命令实现 ----------
-    def _cmd_navigate(self, url, timeout=30000):
-        self._launch()
-        self.page.goto(url, wait_until="networkidle", timeout=timeout)
-        return f"已导航到 {url}"
-
-    # 新增命令
+    # ---------- 页面管理命令 ----------
     def _cmd_new_page(self, url=None):
+        # 直接使用 _get_current_page 确保启动，但创建新页面需要 context
         self._launch()
         new_page = self.context.new_page()
         if url:
@@ -139,14 +156,12 @@ class BrowserService:
         page_id = self.page_id_counter
         self.page_id_counter += 1
         self.pages.append((page_id, new_page))
-        # 自动切换到新页面
         self.current_page_id = page_id
-        self.page = new_page
+        new_page.bring_to_front()
         return {"page_id": page_id, "url": new_page.url}
 
     def _cmd_close_page(self, page_id):
         self._launch()
-        # 防止关闭最后一个页面（至少保留一个）
         if len(self.pages) <= 1:
             return {"error": "Cannot close the only page"}
         target = next((p for p in self.pages if p[0] == page_id), None)
@@ -155,11 +170,11 @@ class BrowserService:
         page = target[1]
         page.close()
         self.pages.remove(target)
-        # 如果关闭的是当前页，切换到第一个
         if self.current_page_id == page_id:
+            # 切换到第一个页面
             new_id = self.pages[0][0]
             self.current_page_id = new_id
-            self.page = self.pages[0][1]
+            self.pages[0][1].bring_to_front()
         return {"success": True, "remaining": len(self.pages)}
 
     def _cmd_switch_page(self, page_id):
@@ -168,9 +183,8 @@ class BrowserService:
         if not target:
             return {"error": f"Page {page_id} not found"}
         self.current_page_id = page_id
-        self.page = target[1]
-        self.page.bring_to_front()   # 激活标签页
-        return {"current_page_id": page_id, "url": self.page.url}
+        target[1].bring_to_front()
+        return {"current_page_id": page_id, "url": target[1].url}
 
     def _cmd_list_pages(self):
         self._launch()
@@ -183,9 +197,16 @@ class BrowserService:
             })
         return {"pages": result, "current_page_id": self.current_page_id}
 
+    # ---------- 浏览器操作命令（均作用于当前活动页） ----------
+    def _cmd_navigate(self, url, timeout=30000):
+        page = self._get_current_page()
+        page.goto(url, wait_until="networkidle", timeout=timeout)
+        page.bring_to_front()
+        return f"已导航到 {url}"
+
     def _cmd_wait(self, ms=1000):
-        self._launch()
-        self.page.wait_for_timeout(ms)
+        page = self._get_current_page()
+        page.wait_for_timeout(ms)
         return f"已等待 {ms} 毫秒"
 
     def _cmd_get_json_snapshot(
@@ -204,15 +225,16 @@ class BrowserService:
         js_path = Path(__file__).parent / "dom_snapshot.js"
         with open(js_path, "r", encoding="utf-8") as f:
             js_code = f.read()
-        tree_data = self.page.evaluate(js_code, params)
+        page = self._get_current_page()
+        tree_data = page.evaluate(js_code, params)
         return json.dumps(tree_data, ensure_ascii=False, sort_keys=False)
 
     def _cmd_get_html(self):
-        self._launch()
-        return self.page.content()
+        page = self._get_current_page()
+        return page.content()
 
     def _cmd_execute_js(self, js_code, timeout=30, args=None):
-        self._launch()
+        page = self._get_current_page()
         timer = None
         timed_out = False
 
@@ -227,7 +249,7 @@ class BrowserService:
             timer.start()
 
             # 将 args 转换为可序列化的 Python 对象，传递给 JS
-            result = self.page.evaluate(js_code, arg=args)
+            result = page.evaluate(js_code, arg=args)
             timer.cancel()
             return str(result) if result is not None else "(无返回值)"
         except Exception as e:
@@ -249,48 +271,48 @@ class BrowserService:
         return self._cmd_execute_js(self._custom_js[name], timeout, args)
 
     def _cmd_click(self, target, by_ref=False):
-        self._launch()
+        page = self._get_current_page()
         selector = f'[data-ds-ref="{target}"]' if by_ref else target
         try:
-            self.page.click(selector, timeout=5000)
+            page.click(selector, timeout=5000)
             return f"已点击 {target}"
         except Exception as e:
             return f"点击失败: {e}"
 
     def _cmd_fill(self, target, text, by_ref=False):
-        self._launch()
+        page = self._get_current_page()
         selector = f'[data-ds-ref="{target}"]' if by_ref else target
         try:
-            self.page.fill(selector, text, timeout=5000)
+            page.fill(selector, text, timeout=5000)
             return f"已填入 '{text}' 到 {target}"
         except Exception as e:
             return f"填充失败: {e}"
 
     def _cmd_hover(self, target, by_ref=False):
-        self._launch()
+        page = self._get_current_page()
         selector = f'[data-ds-ref="{target}"]' if by_ref else target
         try:
-            self.page.hover(selector, timeout=5000)
+            page.hover(selector, timeout=5000)
             return f"已悬停 {target}"
         except Exception as e:
             return f"悬停失败: {e}"
 
     def _cmd_scroll(self, x, y):
-        self._launch()
-        self.page.evaluate(f"window.scrollTo({x}, {y})")
+        page = self._get_current_page()
+        page.evaluate(f"window.scrollTo({x}, {y})")
         return f"已滚动到 ({x}, {y})"
 
     def _cmd_screenshot(self, path=None):
-        self._launch()
+        page = self._get_current_page()
         if path is None:
             from tempfile import gettempdir
             path = Path(gettempdir()) / f"playwright_screenshot_{int(time.time())}.png"
-        self.page.screenshot(path=str(path), full_page=False)
+        page.screenshot(path=str(path), full_page=False)
         return str(path)
 
     def _cmd_get_page_info(self):
-        self._launch()
-        return {"title": self.page.title(), "url": self.page.url}
+        page = self._get_current_page()
+        return {"title": page.title(), "url": page.url}
 
     def _cmd_clear_session(self):
         session_dir = Path(CONFIG["SESSION_DIR"]) / "tools"

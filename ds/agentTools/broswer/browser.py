@@ -87,6 +87,30 @@ def tool_browser_wait(ms):
     return _get_client().wait_for_timeout(ms)
 
 
+def tool_browser_new_page(url=None):
+    """创建新标签页，可指定 URL。返回新页面 ID。"""
+    result = _get_client().new_page(url)
+    return json.dumps(result, ensure_ascii=False)
+
+
+def tool_browser_close_page(page_id):
+    """关闭指定 ID 的标签页。"""
+    result = _get_client().close_page(page_id)
+    return json.dumps(result, ensure_ascii=False)
+
+
+def tool_browser_switch_page(page_id):
+    """切换到指定 ID 的标签页。"""
+    result = _get_client().switch_page(page_id)
+    return json.dumps(result, ensure_ascii=False)
+
+
+def tool_browser_list_pages():
+    """列出所有打开的标签页及其信息。"""
+    result = _get_client().list_pages()
+    return json.dumps(result, ensure_ascii=False)
+
+
 TOOLS["browser_navigate"] = {
     "description": "导航到指定 URL。",
     "parameters": {
@@ -202,4 +226,34 @@ TOOLS["browser_get_page_info"] = {
     "description": "获取当前页面的标题和 URL。",
     "parameters": {},
     "execute": tool_browser_get_page_info,
+}
+
+TOOLS["browser_new_page"] = {
+    "description": "打开一个新标签页，并可选择导航到指定 URL。返回新页面的 ID。",
+    "parameters": {
+        "url": {"type": "string", "required": False, "description": "要导航的 URL（可选）"}
+    },
+    "execute": tool_browser_new_page,
+}
+
+TOOLS["browser_close_page"] = {
+    "description": "关闭指定的标签页（通过页面 ID）。注意不能关闭最后一个页面。",
+    "parameters": {
+        "page_id": {"type": "integer", "required": True, "description": "要关闭的页面 ID"}
+    },
+    "execute": tool_browser_close_page,
+}
+
+TOOLS["browser_switch_page"] = {
+    "description": "切换到指定 ID 的标签页，后续浏览器操作将在该页面上执行。",
+    "parameters": {
+        "page_id": {"type": "integer", "required": True, "description": "目标页面 ID"}
+    },
+    "execute": tool_browser_switch_page,
+}
+
+TOOLS["browser_list_pages"] = {
+    "description": "列出当前所有打开的标签页，包含每个页面的 ID、标题和 URL。",
+    "parameters": {},
+    "execute": tool_browser_list_pages,
 }

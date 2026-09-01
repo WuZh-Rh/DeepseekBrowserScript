@@ -42,6 +42,9 @@ class BrowserService:
         self._initialized = False
         self._custom_js = {}
         self._running = True
+        self.pages = []          # 存储 (page_id, page) 元组
+        self.page_id_counter = 0
+        self.current_page_id = None   # 当前活动页面 ID
 
     def _launch(self):
         """启动浏览器（同步 API）"""
@@ -80,6 +83,19 @@ class BrowserService:
         self.browser = self.context.browser
         self._initialized = True
 
+        for i, p in enumerate(self.context.pages):
+            self.pages.append((i, p))
+        if self.pages:
+            self.page_id_counter = len(self.pages)  # 下一个 id
+            self.current_page_id = 0
+            self.page = self.pages[0][1]
+        else:
+            # 若无页面，则创建一个
+            self.page = self.context.new_page()
+            self.pages.append((0, self.page))
+            self.current_page_id = 0
+            self.page_id_counter = 1
+
     def _kill_browser(self):
         """强制终止浏览器进程"""
         if not self.browser:
@@ -113,6 +129,59 @@ class BrowserService:
         self._launch()
         self.page.goto(url, wait_until="networkidle", timeout=timeout)
         return f"已导航到 {url}"
+
+    # 新增命令
+    def _cmd_new_page(self, url=None):
+        self._launch()
+        new_page = self.context.new_page()
+        if url:
+            new_page.goto(url, wait_until="networkidle")
+        page_id = self.page_id_counter
+        self.page_id_counter += 1
+        self.pages.append((page_id, new_page))
+        # 自动切换到新页面
+        self.current_page_id = page_id
+        self.page = new_page
+        return {"page_id": page_id, "url": new_page.url}
+
+    def _cmd_close_page(self, page_id):
+        self._launch()
+        # 防止关闭最后一个页面（至少保留一个）
+        if len(self.pages) <= 1:
+            return {"error": "Cannot close the only page"}
+        target = next((p for p in self.pages if p[0] == page_id), None)
+        if not target:
+            return {"error": f"Page {page_id} not found"}
+        page = target[1]
+        page.close()
+        self.pages.remove(target)
+        # 如果关闭的是当前页，切换到第一个
+        if self.current_page_id == page_id:
+            new_id = self.pages[0][0]
+            self.current_page_id = new_id
+            self.page = self.pages[0][1]
+        return {"success": True, "remaining": len(self.pages)}
+
+    def _cmd_switch_page(self, page_id):
+        self._launch()
+        target = next((p for p in self.pages if p[0] == page_id), None)
+        if not target:
+            return {"error": f"Page {page_id} not found"}
+        self.current_page_id = page_id
+        self.page = target[1]
+        self.page.bring_to_front()   # 激活标签页
+        return {"current_page_id": page_id, "url": self.page.url}
+
+    def _cmd_list_pages(self):
+        self._launch()
+        result = []
+        for pid, p in self.pages:
+            result.append({
+                "page_id": pid,
+                "url": p.url,
+                "title": p.title()
+            })
+        return {"pages": result, "current_page_id": self.current_page_id}
 
     def _cmd_wait(self, ms=1000):
         self._launch()

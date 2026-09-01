@@ -152,3 +152,16 @@ class BrowserClient:
             if self.process.is_alive():
                 self.process.terminate()
                 self.process.join()
+
+    # 在 BrowserClient 类中添加
+    def new_page(self, url=None):
+        return self._send_command("new_page", {"url": url})
+
+    def close_page(self, page_id):
+        return self._send_command("close_page", {"page_id": page_id})
+
+    def switch_page(self, page_id):
+        return self._send_command("switch_page", {"page_id": page_id})
+
+    def list_pages(self):
+        return self._send_command("list_pages", {})

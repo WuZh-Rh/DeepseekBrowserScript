@@ -624,7 +624,8 @@ class DeepSeekBrowser:
             {"type": "error", "message": "错误信息"}
         """
         try:
-            selector = '.ds-assistant-message-main-content'
+            # selector = '.ds-assistant-message-main-content'
+            selector = '.ds-message'
             elements = self.page.query_selector_all(selector)
             if not elements:
                 return {"type": "final", "content": ""}
@@ -634,32 +635,36 @@ class DeepSeekBrowser:
             full_text = last_el.inner_text().strip()
 
             # 尝试拿工具调用
-            pre = last_el.query_selector('.md-code-block pre')
-            if not pre:
-                return {"type": "final", "content": full_text}
+            pres = last_el.query_selector_all('.md-code-block pre')
 
-            json_text = pre.inner_text().strip()
-            data = json.loads(json_text)
+            for pre in pres[::-1]:
+                try:
+                    json_text = pre.inner_text().strip()
+                    data = json.loads(json_text)
+                except:
+                    continue
 
-            tools = []
-            if isinstance(data, list):
-                for item in data:
-                    if 'name' in item:
-                        tools.append({'name': item['name'], 'args': item.get('args', {})})
-            elif isinstance(data, dict):
-                if 'tools' in data:
-                    for item in data['tools']:
+                tools = []
+                if isinstance(data, list):
+                    for item in data:
                         if 'name' in item:
                             tools.append({'name': item['name'], 'args': item.get('args', {})})
-                else:
-                    name = data.get('name')
-                    if name:
-                        tools.append({'name': name, 'args': data.get('args', {})})
+                elif isinstance(data, dict):
+                    if 'tools' in data:
+                        for item in data['tools']:
+                            if 'name' in item:
+                                tools.append({'name': item['name'], 'args': item.get('args', {})})
+                    else:
+                        name = data.get('name')
+                        if name:
+                            tools.append({'name': name, 'args': data.get('args', {})})
 
-            if tools:
-                return {"type": "tool_call", "tools": tools}
-            else:
-                return {"type": "final", "content": full_text}
+                if tools:
+                    return {"type": "tool_call", "tools": tools}
+                else:
+                    return {"type": "final", "content": full_text}
+
+            return {"type": "final", "content": full_text}
 
         except json.JSONDecodeError:
             return {"type": "error", "message": f"调用工具失败[JSON解析失败]: " + traceback.format_exc()}

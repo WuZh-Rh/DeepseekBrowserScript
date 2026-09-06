@@ -104,6 +104,39 @@ class DeepSeekBrowser:
         self._navigate(CONFIG["DEEPSEEK_URL"])
         LOGGER.dim("已导航到 DeepSeek 首页（新对话）")
 
+    def set_mode(self, mode: str):
+        """切换 DeepSeek 模式，并更新全局配置"""
+        mode_map = {
+            "fast": "default",
+            "expert": "expert",
+            "vision": "vision",
+        }
+        model_type = mode_map.get(mode, "")
+        if not model_type:
+            raise ValueError(f"未知模式: {mode}")
+
+        # 更新全局配置
+        from ds.config import CONFIG
+        CONFIG["MODE"] = mode
+
+        try:
+            self.page.wait_for_selector('div[role="radiogroup"]', timeout=10000)
+        except Exception:
+            LOGGER.warn("模式切换失败, 未找到模式选择器")
+            return
+
+        selector = f'div[data-model-type="{model_type}"]'
+        try:
+            btn = self.page.wait_for_selector(selector, timeout=5000, state="visible")
+            if btn:
+                btn.click()
+                time.sleep(1.5)
+                LOGGER.info(f"已切换至 {mode} 模式")
+            else:
+                LOGGER.warn(f"未找到模式按钮: {selector}")
+        except Exception as e:
+            LOGGER.warn(f"切换模式失败: {e}")
+
     def _ensure_logged_in(self):
         time.sleep(2)
         # 检查是否需要登录

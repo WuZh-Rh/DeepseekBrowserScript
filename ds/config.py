@@ -23,6 +23,7 @@ DEFAULT_CONFIG = {
     "WORKING_DIR": os.getcwd(),
     "MAX_OUTPUT_LENGTH": 8000,
     "DEBUG": False,
+    "MODE": "fast",  # 默认快速模式
     "QQ_API_HOST": "10.147.19.186",  # 请根据实际修改
     "QQ_API_PORT": 3000,
     "QQ_POLL_TIMEOUT": 180,          # 分钟

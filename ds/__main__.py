@@ -43,11 +43,14 @@ def parse_args():
     parser.add_argument("--save-log", action="store_true", help="保存会话日志到 ~/.deepseek-agent/logs/")
     parser.add_argument("--test-bat", dest="test_bat", help="指定测试脚本（.bat），用于验证最终结果")
     parser.add_argument("--log-path", dest="log_path", help="指定日志目录", default="./logs")
-    parser.add_argument("--roll-name", dest="roll_name", help="滚动日志的时候添加的后缀(YYYY-MM-DD-XXXX-?.log)", default="")
+    parser.add_argument("--roll-name", dest="roll_name",
+                        help="滚动日志的时候添加的后缀(YYYY-MM-DD-XXXX-?.log)", default="")
     parser.add_argument("-m", "--max-iterations", type=int, help="限制 Agent 的最大循环轮数（默认 150）")
     parser.add_argument("-S", "--session-dir", dest="session_dir", help="指定会话目录", default="main")
     parser.add_argument("--deny-tools", nargs='+', help="禁用指定的工具，空格分隔", default=None)
     parser.add_argument("--ext-tools", nargs='+', help="扩展工具['wzq', ](默认不添加)", default=None)
+    parser.add_argument("--mode", choices=["fast", "expert", "vision"], default="fast",
+                        help="选择 DeepSeek 模式：fast（快速）, expert（专家）, vision（识图），默认 fast")
     parser.add_argument("--task-path", help="从文件读取任务内容")
     parser.add_argument("--load-file", help="上传/加载指定文件")
     parser.add_argument("rest", nargs="*", help="任务文本（不带 -t 时）")
@@ -94,6 +97,8 @@ def main():
         CONFIG["DEBUG"] = True
     if args.headless:
         CONFIG["HEADLESS"] = True
+    if args.mode:
+        CONFIG["MODE"] = args.mode
     if args.working_dir:
         resolved = Path(args.working_dir).resolve()
         if not resolved.exists():
@@ -188,6 +193,7 @@ def main():
 
     try:
         agent.init()
+        agent.browser.set_mode(CONFIG["MODE"])
     except Exception as e:
         error_str = traceback.format_exc()
         LOGGER.error(f"任务失败: {e}")

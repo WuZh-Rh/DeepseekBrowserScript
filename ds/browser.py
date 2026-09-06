@@ -682,6 +682,9 @@ class DeepSeekBrowser:
                          如果不提供，将自动尝试常见的选择器。
         :raises RuntimeError: 如果找不到文件输入元素
         """
+        if CONFIG["MODE"] == "expert":
+            LOGGER.warn("专家模式下不支持文件上传")
+            return
         # 统一转换为字符串列表
         if isinstance(file_paths, (str, Path)):
             file_paths = [str(file_paths)]

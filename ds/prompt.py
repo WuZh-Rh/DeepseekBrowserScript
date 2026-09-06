@@ -7,6 +7,8 @@
 # src/prompt.py
 import platform
 from datetime import datetime
+from typing import List, Dict
+
 from .config import CONFIG
 from ds.agentTools import get_tool_descriptions
 
@@ -95,7 +97,7 @@ def build_system_prompt():
 
 class ConversationManager:
     def __init__(self):
-        self.messages = []
+        self.messages: List[Dict["str", "str"]] = []
         self._system_prompt = None
 
     def build_first_message(self, task, working_dir_listing):

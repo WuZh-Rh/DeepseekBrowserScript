@@ -12,9 +12,14 @@ TOOLS = {}
 
 def init_tools():
     from ds.agentTools import file
-    from ds.agentTools import qqbot
     from ds.agentTools import task
     from ds.agentTools.broswer import browser
+    if CONFIG["QQ_API_HOST"] and CONFIG["QQ_API_PORT"]:
+        from ds.agentTools import qqbot
+    else:
+        from ds.logger import getLogger
+        getLogger("INIT_TOOL").warn("未配置qqAPI, qqBotTools启动失败")
+        getLogger("INIT_TOOL").warn("你需要在配置文件中设置[QQ_API_HOST], [QQ_API_PORT]并开放http服务器来启用qqbot")
 
 
 # ---- 工具描述和调度 ----

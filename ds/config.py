@@ -9,6 +9,8 @@ import os
 import json
 from pathlib import Path
 
+from ds.logger import getLogger
+
 HOME = Path.home()
 SELF_PATH = Path(os.path.abspath(__file__)).parent.parent
 
@@ -24,7 +26,7 @@ DEFAULT_CONFIG = {
     "MAX_OUTPUT_LENGTH": 8000,
     "DEBUG": False,
     "MODE": "fast",  # 默认快速模式
-    "QQ_API_HOST": "10.147.19.186",  # 请根据实际修改
+    "QQ_API_HOST": "",  # 请根据实际修改
     "QQ_API_PORT": 3000,
     "QQ_POLL_TIMEOUT": 180,          # 分钟
     "QQ_POLL_INTERVAL": 5,           # 秒
@@ -43,12 +45,14 @@ def load_json(path):
 def get_config():
     config = DEFAULT_CONFIG.copy()
     global_cfg = load_json(HOME / ".deepseek-agent" / "config.json")
-    project_cfg = load_json(Path.cwd() / "deepseek-agent.config.json")
+    json_config_path = Path.cwd() / "ds-agent-config.json"
+    if not json_config_path.exists():
+        getLogger("LOAD_JSON").info(f"未在路径{json_config_path}发现文件, 将使用默认配置文件")
+    project_cfg = load_json(json_config_path)
     config.update(global_cfg)
     config.update(project_cfg)
     # 确保会话目录存在
     Path(config["SESSION_DIR"]).mkdir(parents=True, exist_ok=True)
-    (HOME / ".deepseek-agent" / "logs").mkdir(parents=True, exist_ok=True)
     return config
 
 

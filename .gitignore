@@ -7,3 +7,8 @@
 /prompt/
 /dsBrowser.egg-info/
 /ds-agent-config.json
+/.idea
+__pycache__/
+*.pyc
+*.pyo
+*.pyd

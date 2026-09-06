@@ -8,6 +8,7 @@
 import json
 import time
 import traceback
+from typing import Optional
 
 from playwright.sync_api import sync_playwright
 from pathlib import Path
@@ -263,7 +264,7 @@ class DeepSeekBrowser:
         initial_count = self._get_message_count()
         appeared = False
         while time.time() - start < 12:
-            prompts = self._get_prompt_texts()
+            prompts = self._get_prompt_texts(conversation)
             if any("达到对话长度上限" in prompt for prompt in prompts):
                 raise RuntimeError("对话达到长度限制")
             retry_count = -1
@@ -279,7 +280,7 @@ class DeepSeekBrowser:
                 time.sleep(3)
                 if retry_fail == 10:
                     raise RuntimeError("消息发送过于频繁且重试按钮点击失败")
-                prompts = self._get_prompt_texts()
+                prompts = self._get_prompt_texts(conversation)
                 start = time.time()
                 initial_count = self._get_message_count()
             if retry_count == 0:
@@ -418,59 +419,26 @@ class DeepSeekBrowser:
             }
         """)
 
-    def _get_prompt_texts(self):
+    def _get_prompt_texts(
+        self, conversation: Optional[ConversationManager] = None
+    ):
         """
         从页面上提取所有可能的提示框文本（如“达到对话长度上限，请开启新对话”）。
         基于稳定的 .ds-flex 类定位，排除助手消息内部的按钮组。
         返回所有匹配文本的列表。
         """
         try:
-            texts = self.page.evaluate("""
-                () => {
-                    const results = [];
-
-                    document.querySelectorAll('.ds-flex').forEach(flex => {
-                        const parent = flex.parentElement;
-                        if (!parent) return;
-
-                        // 跳过位于 .ds-message 内部的按钮（助手消息中的操作按钮）
-                        if (parent.closest && parent.closest('.ds-message')) {
-                            return;
-                        }
-
-                        const siblings = [parent.previousElementSibling, parent.nextElementSibling];
-                        for (const sib of siblings) {
-                            if (!sib) continue;
-                            const span = sib.querySelector('span');
-                            if (span) {
-                                const text = span.textContent.trim();
-                                if (text.length > 0) {
-                                    results.push(text);
-                                }
-                            }
-                        }
-
-                        const spanInParent = parent.querySelector('span');
-                        if (spanInParent) {
-                            const text = spanInParent.textContent.trim();
-                            if (text.length > 0) {
-                                results.push(text);
-                            }
-                        }
-                    });
-
-                    // 如果没找到，再试一个更宽松的 fallback（只用于调试）
-                    if (results.length === 0) {
-                        const fallback = document.querySelector('span:has-text("开启新对话")');
-                        if (fallback) {
-                            const text = fallback.textContent.trim();
-                            if (text.length > 0) results.push(text);
-                        }
-                    }
-
-                    return results;  // 返回数组
-                }
-            """)
+            js_code = open(Path(__file__).parent / "get_prompt_texts.js", "r").read()
+            result_texts = self.page.evaluate(js_code)
+            if conversation:
+                texts = []
+                conversation_texts = [i["content"] for i in conversation.messages]
+                for result_text in result_texts:
+                    if result_text in conversation_texts:
+                        continue
+                    texts.append(result_text)
+            else:
+                texts = result_texts
             return texts if texts else []
         except Exception:
             return []

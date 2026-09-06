@@ -1,7 +1,3 @@
-你说得对，我重新写一个完整的。不是最短也不是最啰嗦，该有的都有：
-
----
-
 # DeepseekBrowserScript
 
 > 基于 Playwright 浏览器自动化的 AI 编码代理框架。通过浏览器与 DeepSeek 对话，让 AI 直接操作文件系统、执行 Shell 命令、收发 QQ 消息、控制浏览器页面。**无需 API 密钥**。

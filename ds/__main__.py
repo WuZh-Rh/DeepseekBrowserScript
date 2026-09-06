@@ -40,7 +40,6 @@ def parse_args():
     parser.add_argument("-d", "--dir", "--work-dir", dest="working_dir", help="设置工作目录（默认当前目录）")
     parser.add_argument("--debug", action="store_true", help="输出详细的调试信息")
     parser.add_argument("--headless", action="store_true", help="无头模式运行浏览器")
-    parser.add_argument("--save-log", action="store_true", help="保存会话日志到 ~/.deepseek-agent/logs/")
     parser.add_argument("--test-bat", dest="test_bat", help="指定测试脚本（.bat），用于验证最终结果")
     parser.add_argument("--log-path", dest="log_path", help="指定日志目录", default="./logs")
     parser.add_argument("--roll-name", dest="roll_name",
@@ -169,7 +168,6 @@ def main():
     # 创建 Agent
     from ds.agent import DeepSeekAgent
     agent = DeepSeekAgent({
-        "save_log": args.save_log,
         "test_bat": args.test_bat,
         "log_file": log_file_path,
     })

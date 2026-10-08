@@ -672,6 +672,17 @@ class DeepSeekBrowser:
         except Exception:
             return {"type": "error", "message": f"提取工具调用失败: " + traceback.format_exc()}
 
+    def get_last_assistant_text(self):
+        """返回页面上最后一条助手消息的纯文本。
+
+        用于在“衔接历史对话”时建立基线，避免 wait_for_response
+        把已存在的旧回复误判为新响应。
+        """
+        try:
+            return self._extract_last_message() or ""
+        except Exception:
+            return ""
+
     def load_file(self, file_paths, selector=None):
         """
         模拟通过文件输入框上传文件（相当于点击“选择文件”对话框）。

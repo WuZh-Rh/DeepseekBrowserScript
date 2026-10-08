@@ -37,12 +37,40 @@ class DeepSeekAgent:
         self.test_bat_path = options.get('test_bat')
         self.log_file_path = options.get('log_file')
         self.done_test = True
+        # resume 子命令目标：None 表示不衔接（新建对话）
+        # "__latest__" 表示衔接最近一次；数字=索引；其它=标题匹配
+        self.resume_target = options.get('resume')
+        self._resumed = False
 
     def init(self):
         self.browser.launch()
-        self.browser.new_chat()
         from ds.agentTools import set_browser
         set_browser(self.browser)
+        if self.resume_target is not None:
+            self.resume_chat(self.resume_target)
+            self._resumed = True
+        else:
+            self.browser.new_chat()
+
+    def resume_chat(self, target):
+        """衔接历史对话（切换到已有的某个对话）。
+
+        :param target: "__latest__"/None/"" -> 侧边栏第一条（最近一次对话）
+                       纯数字字符串/int         -> 侧边栏索引（0 为最近）
+                       其它字符串               -> 对话标题（部分匹配）
+        """
+        if target is None or target == "" or target == "__latest__":
+            self.browser.select_chat_by_index(0)
+            LOGGER.info("已衔接最近一次对话")
+            return
+        t = str(target).strip()
+        if t.lstrip("+-").isdigit():
+            idx = int(t)
+            self.browser.select_chat_by_index(idx)
+            LOGGER.info(f"已衔接索引为 {idx} 的历史对话")
+        else:
+            self.browser.select_chat_by_title(t)
+            LOGGER.info(f"已衔接标题包含 '{t}' 的历史对话")
 
     def shutdown(self):
         self.browser.close()
@@ -100,22 +128,29 @@ class DeepSeekAgent:
         except Exception as e:
             return {"passed": False, "output": str(e)}
 
-    def run(self, task):
+    def run(self, task, no_send=False):
         self._running = True
         max_iter = CONFIG["MAX_ITERATIONS"]
 
-        # 目录快照
-        dir_listing = self._get_working_dir_listing()
-
-        LOGGER.header(f"任务: {task[:80]}{'…' if len(task) > 80 else ''}")
-
-        first_msg = self.conversation.build_first_message(task, dir_listing)
-        if CONFIG["DEBUG"]:
-            LOGGER.dim("--- 第一条消息（已截断）---")
-            LOGGER.dim(first_msg[:600] + "...")
-
-        LOGGER.info("正在向 DeepSeek 发送任务...")
-        self.browser.send_message(first_msg + _get_prompt())
+        if no_send:
+            # resume 且未附带任务：不发送任何消息，直接读页面最后一条助手消息继续
+            LOGGER.header("任务: （从页面已有对话继续）")
+            LOGGER.info("resume：不发送新消息，直接读取页面最后一条消息继续")
+        else:
+            LOGGER.header(f"任务: {task[:80]}{'…' if len(task) > 80 else ''}")
+            if self._resumed:
+                # 衔接历史对话：系统提示词、目录上下文都已在历史里，只发任务本身
+                first_msg = task
+                self.conversation.messages.append({"role": "user", "content": task})
+            else:
+                # 仅新建对话时才抓目录快照
+                dir_listing = self._get_working_dir_listing()
+                first_msg = self.conversation.build_first_message(task, dir_listing)
+            if CONFIG["DEBUG"]:
+                LOGGER.dim("--- 第一条消息（已截断）---")
+                LOGGER.dim(first_msg[:600] + "...")
+            LOGGER.info("正在向 DeepSeek 发送任务...")
+            self.browser.send_message(first_msg + _get_prompt())
 
         test_failed = False
         other_tool_called_after_test = False
@@ -123,10 +158,17 @@ class DeepSeekAgent:
         for iter_num in range(1, max_iter + 1):
             LOGGER.iteration(iter_num, max_iter)
 
-            try:
-                raw_response = self.browser.wait_for_response(self.conversation)
-            except Exception:
-                return {"data": {"content": traceback.format_exc()}, "completed": False}
+            if iter_num == 1 and no_send:
+                # 不等待新消息，直接读页面已有的最后一条助手消息
+                raw_response = self.browser.get_last_assistant_text() or ""
+                if not raw_response.strip():
+                    LOGGER.warn("页面没有可用的助手消息，无法继续")
+                    return {"data": {"content": "no assistant message on page"}, "completed": False}
+            else:
+                try:
+                    raw_response = self.browser.wait_for_response(self.conversation)
+                except Exception:
+                    return {"data": {"content": traceback.format_exc()}, "completed": False}
             if not raw_response or not raw_response.strip():
                 LOGGER.warn("收到空响应 — 正在重试...")
                 self.browser.send_message("请继续。如果你在等待输入，请做出最佳判断后继续。" + _get_prompt())
@@ -231,7 +273,8 @@ class DeepSeekAgent:
 
     def run_interactive(self):
         LOGGER.header("交互模式 — 输入你的任务，按回车执行")
-        LOGGER.info('命令: "exit" 或 "quit" 退出, "new" 开始新对话\n')
+        LOGGER.info('命令: "exit"/"quit" 退出, "new" 开始新对话, '
+                    '"resume [索引|#标题]" 衔接历史对话\n')
 
         while True:
             try:
@@ -247,11 +290,31 @@ class DeepSeekAgent:
                 LOGGER.info("开始新对话...")
                 self.browser.new_chat()
                 self.conversation = ConversationManager()
+                self._resumed = False
+                continue
+
+            # resume / continue [索引|#标题] —— 衔接历史对话
+            cmd, _, arg = task.partition(" ")
+            if cmd.lower() in ("resume", "continue", "r"):
+                arg = arg.strip()
+                if arg.startswith("#"):
+                    arg = arg[1:].strip()
+                elif not arg:
+                    arg = "__latest__"
+                self.conversation = ConversationManager()
+                try:
+                    self.resume_chat(arg)
+                    self._resumed = True
+                except Exception as e:
+                    LOGGER.error(f"衔接历史对话失败: {e}")
+                    self._resumed = False
                 continue
 
             self.conversation = ConversationManager()
             try:
-                self.browser.new_chat()
+                # 若当前处于衔接历史对话状态，则不要新建对话
+                if not self._resumed:
+                    self.browser.new_chat()
                 self.run(task)
             except Exception as e:
                 error_str = traceback.format_exc()

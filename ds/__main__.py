@@ -24,36 +24,116 @@ SELF_PATH = os.getcwd()
 
 
 def parse_args():
+    argv = sys.argv[1:]
+
+    # 只有当第一个位置参数是 resume/continue/r 时，才启用 argparse 子命令；
+    # 否则裸任务文本（如 ds "写个脚本"）会与子命令冲突。
+    _VALUE_OPTS = {"-t", "--task", "-d", "--dir", "--work-dir", "--test-bat",
+                   "--log-path", "--roll-name", "-m", "--max-iterations",
+                   "-S", "--session-dir", "--task-path", "--load-file"}
+
+    def first_positional(tokens):
+        i = 0
+        while i < len(tokens):
+            t = tokens[i]
+            if t == "--":
+                return tokens[i + 1] if i + 1 < len(tokens) else None
+            if t.startswith("-") and t != "-":
+                if "=" in t:
+                    i += 1
+                elif t in _VALUE_OPTS:
+                    i += 2
+                else:
+                    i += 1
+            else:
+                return t
+        return None
+
+    fp = first_positional(argv)
+    use_sub = fp is not None and fp.lower() in ("resume", "continue", "r")
+
+    # 全局参数定义。主 parser 用正常默认值；子 parser 用 SUPPRESS 默认值，
+    # 这样当参数出现在子命令之前时，主 parser 的结果不会被子 parser 覆盖。
+    def _add_common(p, suppress):
+        def d(v):
+            return argparse.SUPPRESS if suppress else v
+        p.add_argument("-t", "--task", default=d(None), help="要运行的任务")
+        p.add_argument("-i", "--interactive", action="store_true", default=d(False),
+                       help="交互式 REPL 模式")
+        p.add_argument("-d", "--dir", "--work-dir", dest="working_dir", default=d(None),
+                       help="设置工作目录")
+        p.add_argument("--debug", action="store_true", default=d(False), help="输出详细的调试信息")
+        p.add_argument("--headless", action="store_true", default=d(False), help="无头模式运行浏览器")
+        p.add_argument("--test-bat", dest="test_bat", default=d(None), help="指定测试脚本")
+        p.add_argument("--log-path", dest="log_path", default=d("./logs"), help="指定日志目录")
+        p.add_argument("--roll-name", dest="roll_name", default=d(""), help="日志滚动后缀")
+        p.add_argument("-m", "--max-iterations", type=int, default=d(None),
+                       help="Agent 最大循环轮数")
+        p.add_argument("-S", "--session-dir", dest="session_dir", default=d("main"),
+                       help="指定会话目录")
+        p.add_argument("--deny-tools", nargs='+', default=d(None), help="禁用指定的工具")
+        p.add_argument("--ext-tools", nargs='+', default=d(None), help="扩展工具")
+        p.add_argument("--mode", choices=["fast", "expert", "vision"], default=d("fast"),
+                       help="DeepSeek 模式")
+        p.add_argument("--task-path", default=d(None), help="从文件读取任务内容")
+        p.add_argument("--load-file", default=d(None), help="上传/加载指定文件")
+
+    main_common = argparse.ArgumentParser(add_help=False)
+    _add_common(main_common, suppress=False)
+    sub_common = argparse.ArgumentParser(add_help=False)
+    _add_common(sub_common, suppress=True)
+
     parser = argparse.ArgumentParser(
         description="DeepSeek 浏览器代理 — 通过浏览器自动化实现的 AI 编码代理",
         formatter_class=argparse.RawDescriptionHelpFormatter,
+        parents=[main_common],
         epilog="""
 示例:
   python -m ds "写一个 Hello World"
   python -m ds --interactive
-  python -m ds --headless "构建项目"
-  python -m ds --calibrate
-        """
+  python -m ds -S test "构建项目"
+
+子命令:
+  python -m ds resume                 # 衔接最近一次对话，读页面最后一条消息继续
+  python -m ds resume -I 1            # 衔接侧边栏索引为 1 的对话，继续
+  python -m ds resume -T 爬虫          # 衔接标题含“爬虫”的对话，继续
+  python -m ds resume "新任务"         # 衔接最近一次对话，并发起新任务
+
+注意：全局参数（-S/-d/-m/--mode 等）在子命令前后都可以用。
+        """,
     )
-    parser.add_argument("-t", "--task", help="要运行的任务（也可以不加标志直接写）")
-    parser.add_argument("-i", "--interactive", action="store_true", help="交互式 REPL 模式")
-    parser.add_argument("-d", "--dir", "--work-dir", dest="working_dir", help="设置工作目录（默认当前目录）")
-    parser.add_argument("--debug", action="store_true", help="输出详细的调试信息")
-    parser.add_argument("--headless", action="store_true", help="无头模式运行浏览器")
-    parser.add_argument("--test-bat", dest="test_bat", help="指定测试脚本（.bat），用于验证最终结果")
-    parser.add_argument("--log-path", dest="log_path", help="指定日志目录", default="./logs")
-    parser.add_argument("--roll-name", dest="roll_name",
-                        help="滚动日志的时候添加的后缀(YYYY-MM-DD-XXXX-?.log)", default="")
-    parser.add_argument("-m", "--max-iterations", type=int, help="限制 Agent 的最大循环轮数（默认 150）")
-    parser.add_argument("-S", "--session-dir", dest="session_dir", help="指定会话目录", default="main")
-    parser.add_argument("--deny-tools", nargs='+', help="禁用指定的工具，空格分隔", default=None)
-    parser.add_argument("--ext-tools", nargs='+', help="扩展工具['wzq', ](默认不添加)", default=None)
-    parser.add_argument("--mode", choices=["fast", "expert", "vision"], default="fast",
-                        help="选择 DeepSeek 模式：fast（快速）, expert（专家）, vision（识图），默认 fast")
-    parser.add_argument("--task-path", help="从文件读取任务内容")
-    parser.add_argument("--load-file", help="上传/加载指定文件")
-    parser.add_argument("rest", nargs="*", help="任务文本（不带 -t 时）")
-    return parser.parse_args()
+
+    if use_sub:
+        subparsers = parser.add_subparsers(dest="command", metavar="{resume}")
+        p_resume = subparsers.add_parser(
+            "resume", aliases=["continue", "r"], parents=[sub_common],
+            help="衔接历史对话（不新建）。省略任务时直接读页面最后一条消息继续。",
+        )
+        p_resume.add_argument("-I", "--index", dest="resume_index", type=int, default=None,
+                              help="侧边栏索引（0 为最近一次）")
+        p_resume.add_argument("-T", "--title", dest="resume_title", default=None,
+                              help="标题片段（匹配侧边栏对话标题）")
+        p_resume.add_argument("resume_task", nargs="*", default=[],
+                              help="衔接后要发送的任务；省略则直接读页面最后一条消息继续")
+        args = parser.parse_args()
+        if args.resume_index is not None and args.resume_title is not None:
+            parser.error("resume: --index 与 --title 不能同时使用")
+        if args.resume_index is not None:
+            if args.resume_index < 0:
+                parser.error("resume: --index 不能为负数")
+            args.resume = str(args.resume_index)
+        elif args.resume_title is not None:
+            args.resume = args.resume_title
+        else:
+            args.resume = "__latest__"
+        args.rest = list(args.resume_task)
+    else:
+        parser.add_argument("rest", nargs="*", help="任务文本")
+        args = parser.parse_args()
+        args.resume = None
+        args.rest = list(args.rest)
+
+    return args
 
 
 def main():
@@ -155,8 +235,12 @@ def main():
             sys.exit(1)
     if not task and args.rest:
         task = " ".join(args.rest)
+    if type(task) is list:
+        task = " ".join(args.task)
 
     # 打印横幅
+    if args.resume is not None:
+        LOGGER.info(f"衔接对话 : {args.resume}（将切换到历史会话而非新建）")
     LOGGER.info(f"工作目录 : {CONFIG['WORKING_DIR']}")
     LOGGER.info(f"会话目录 : {CONFIG['SESSION_DIR']}")
     LOGGER.info(f"无头模式   : {CONFIG['HEADLESS']}")
@@ -170,6 +254,7 @@ def main():
     agent = DeepSeekAgent({
         "test_bat": args.test_bat,
         "log_file": log_file_path,
+        "resume": args.resume,
     })
 
     # 信号处理
@@ -184,10 +269,16 @@ def main():
     signal.signal(signal.SIGINT, lambda s, _f: shutdown(0))
     signal.signal(signal.SIGTERM, lambda s, _f: shutdown(0))
 
-    # 无任务则进入交互
+    # 无任务时的处理
+    resume_no_task = False
     if not args.interactive and not task:
-        LOGGER.warn("未提供任务。切换到交互模式...\n")
-        args.interactive = True
+        if args.resume is not None:
+            # resume 且未附带任务：不发送任何消息，直接读页面最后一条消息继续
+            resume_no_task = True
+            LOGGER.info("resume 未附带任务：将从页面最后一条消息继续（不发送新消息）")
+        else:
+            LOGGER.warn("未提供任务。切换到交互模式...\n")
+            args.interactive = True
 
     try:
         agent.init()
@@ -205,7 +296,7 @@ def main():
         else:
             if args.load_file:
                 agent.browser.load_file(args.load_file)
-            result = agent.run(task)
+            result = agent.run(task, no_send=resume_no_task)
             if not result.get("completed", False):
                 LOGGER.error("任务失败，未能完成。")
                 LOGGER.error(result.get("content", ""))

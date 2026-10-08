@@ -51,6 +51,9 @@ class _BGSession:
                         break
                     with self.lock:
                         buffer.append(chunk)
+            except UnicodeDecodeError:
+                # 单个字符解码失败不应该杀死线程
+                pass
             except Exception:
                 pass
 
@@ -270,7 +273,8 @@ def tool_run_command(command, cwd=None, timeout=60, env=None, wait=True):
             cwd=work_dir,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
-            text=True,
+            encoding='utf-8',
+            errors='replace',          # 遇到非法字节用 � 代替，不再抛异常
             env=env_vars,
         )
         # 只有后台模式才需要可写 stdin
@@ -333,12 +337,15 @@ def tool_run_command(command, cwd=None, timeout=60, env=None, wait=True):
         stdout, stderr = process.communicate()
         timer.cancel()
 
+        # 兜底：communicate 在极少数情况下可能返回 None
+        stdout = stdout or ""
+        stderr = stderr or ""
+        output = stdout + stderr
+
         # 若因超时而强杀，抛出异常
         if timed_out.is_set():
-            output = stdout + stderr
             raise RuntimeError(f"最后输出：\n{truncate(output or '无输出')}\n命令执行超时（{timeout} 秒），已被强制终止")
 
-        output = stdout + stderr
         if process.returncode != 0:
             raise RuntimeError(
                 f"命令执行失败（退出码 {process.returncode}）：\n{truncate(output or '无输出')}"
@@ -491,10 +498,11 @@ def tool_run_test():
             shell=True,
             cwd=CONFIG["WORKING_DIR"],
             capture_output=True,
-            text=True,
+            encoding='utf-8',
+            errors='replace',
             env={**os.environ, "DSA_LOG_FILE": os.environ.get("DSA_LOG_FILE", "")}
         )
-        output = result.stdout + "\n" + result.stderr
+        output = (result.stdout or "") + "\n" + (result.stderr or "")
         lines = output.splitlines()
         last_hundred = "\n".join(lines[-100:])
         if result.returncode == 0:

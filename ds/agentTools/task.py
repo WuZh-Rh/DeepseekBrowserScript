@@ -22,9 +22,75 @@ from ds.config import CONFIG
 _job_handle = None
 _job_initialized = False
 
-# ---------- 后台进程管理（后备清理） ----------
+# ---------- 后台进程管理（后备清理 + 交互会话） ----------
 _background_processes = []
+_background_sessions = {}   # pid -> _BGSession
 _atexit_registered = False
+
+
+class _BGSession:
+    """后台进程会话：保存进程对象、缓存 stdout/stderr、提供 stdin 写入能力。"""
+
+    def __init__(self, process):
+        self.process = process
+        self.stdout_chunks = []
+        self.stderr_chunks = []
+        self.lock = threading.Lock()
+        self._start_reader(process.stdout, self.stdout_chunks)
+        self._start_reader(process.stderr, self.stderr_chunks)
+
+    def _start_reader(self, stream, buffer):
+        if stream is None:
+            return
+
+        def _reader():
+            try:
+                while True:
+                    chunk = stream.readline()
+                    if not chunk:
+                        break
+                    with self.lock:
+                        buffer.append(chunk)
+            except Exception:
+                pass
+
+        t = threading.Thread(target=_reader, daemon=True)
+        t.start()
+
+    def read_output(self, clear=True):
+        with self.lock:
+            out = "".join(self.stdout_chunks)
+            err = "".join(self.stderr_chunks)
+            if clear:
+                self.stdout_chunks.clear()
+                self.stderr_chunks.clear()
+        return out, err
+
+    def send_input(self, data, newline=True):
+        if self.process.poll() is not None:
+            raise RuntimeError(
+                f"进程已退出（退出码 {self.process.returncode}），无法再发送输入"
+            )
+        if self.process.stdin is None:
+            raise RuntimeError("该进程没有可用的 stdin 管道")
+        s = str(data)
+        if newline and not s.endswith("\n"):
+            s += "\n"
+        try:
+            self.process.stdin.write(s)
+            self.process.stdin.flush()
+        except Exception as e:
+            raise RuntimeError(f"写入 stdin 失败: {e}")
+
+    def close_input(self):
+        if self.process.stdin:
+            try:
+                self.process.stdin.close()
+            except Exception:
+                pass
+
+    def is_running(self):
+        return self.process.poll() is None
 
 
 def _cleanup_background_processes():
@@ -175,10 +241,11 @@ def tool_run_command(command, cwd=None, timeout=60, env=None, wait=True):
     """
     执行 shell 命令并返回其输出。默认在工作目录中运行。
 
-    新增参数：
+    参数：
         wait (bool): 是否等待命令结束并获取输出。
-                     若为 False，则命令在后台运行（用户需自行保证命令能后台执行），
-                     工具立即返回启动信息，不捕获输出也不超时。
+                     若为 False，则命令在后台运行，工具立即返回启动信息，
+                     并通过会话 ID（PID）支持后续 send_input / read_output /
+                     close_input / kill_background 等交互。
                      默认为 True，保持原有行为。
     """
     # 自动修复 Windows start 命令
@@ -198,29 +265,24 @@ def tool_run_command(command, cwd=None, timeout=60, env=None, wait=True):
 
     try:
         # 创建进程
+        pop_kwargs = dict(
+            shell=True,
+            cwd=work_dir,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            env=env_vars,
+        )
+        # 只有后台模式才需要可写 stdin
+        if not wait:
+            pop_kwargs["stdin"] = subprocess.PIPE
+
         if sys.platform == "win32":
-            creation_flags = subprocess.CREATE_NEW_PROCESS_GROUP
-            process = subprocess.Popen(
-                command,
-                shell=True,
-                cwd=work_dir,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-                text=True,
-                env=env_vars,
-                creationflags=creation_flags,
-            )
+            pop_kwargs["creationflags"] = subprocess.CREATE_NEW_PROCESS_GROUP
         else:
-            process = subprocess.Popen(
-                command,
-                shell=True,
-                cwd=work_dir,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-                text=True,
-                env=env_vars,
-                start_new_session=True,
-            )
+            pop_kwargs["start_new_session"] = True
+
+        process = subprocess.Popen(command, **pop_kwargs)
 
         # 如果不等待，则直接返回（不启动定时器，不调用 communicate）
         if not wait:
@@ -245,15 +307,22 @@ def tool_run_command(command, cwd=None, timeout=60, env=None, wait=True):
                         # 无法打开进程句柄，静默忽略
                         pass
 
-            # 后备清理：父进程正常退出时（含 Ctrl+C）杀死所有后台进程
+            # 创建会话并登记（支持后续 send_input / read_output / close_input / kill）
+            session = _BGSession(process)
+            _background_sessions[process.pid] = session
             _background_processes.append(process)
+
+            # 后备清理：父进程正常退出时（含 Ctrl+C）杀死所有后台进程
             global _atexit_registered
             if not _atexit_registered:
                 atexit.register(_cleanup_background_processes)
                 _atexit_registered = True
 
             time.sleep(0.2)
-            return f"后台命令已启动 (PID: {process.pid})"
+            return (
+                f"后台命令已启动 (PID: {process.pid})。"
+                f"可用 send_input / read_output / close_input / kill_background / list_background 与其交互。"
+            )
 
         # 启动超时定时器
         timer = threading.Timer(timeout, force_kill)
@@ -288,15 +357,121 @@ def tool_run_command(command, cwd=None, timeout=60, env=None, wait=True):
 
 # ===== 更新 TOOLS["run_command"] 定义 =====
 TOOLS["run_command"] = {
-    "description": "执行 shell 命令并返回其输出。默认在工作目录中运行。若设置 wait=False，则命令在后台运行（仅适用于 Windows 的 start /B 或 Unix 的 & 方式），不等待结果。",
+    "description": (
+        "执行 shell 命令并返回其输出。默认在工作目录中运行。"
+        "若设置 wait=False，则命令在后台运行，工具会立即返回 PID，"
+        "后续可用 send_input / read_output / close_input / kill_background 与之交互。"
+    ),
     "parameters": {
         "command": {"type": "string", "required": True, "description": "要执行的 shell 命令"},
         "cwd": {"type": "string", "required": False, "description": "命令的工作目录"},
         "timeout": {"type": "number", "required": False, "description": "超时时间（秒），默认 60，仅当 wait=True 时有效"},
         "env": {"type": "object", "required": False, "description": "额外的环境变量（键值对）"},
-        "wait": {"type": "boolean", "required": False, "description": "是否等待命令完成并返回输出，默认 True。设为 False 时命令后台运行，立即返回。"},
+        "wait": {"type": "boolean", "required": False, "description": "是否等待命令完成并返回输出，默认 True。设为 False 时命令后台运行，立即返回 PID。"},
     },
     "execute": tool_run_command,
+}
+
+
+# ===== 后台任务交互工具 =====
+
+def tool_send_input(pid, data, newline=True):
+    """向指定后台进程的 stdin 发送一行输入。"""
+    session = _background_sessions.get(int(pid))
+    if not session:
+        raise RuntimeError(f"未找到 PID 为 {pid} 的后台会话")
+    session.send_input(data, newline=newline)
+    return {"success": True, "data": f"已向 PID {pid} 发送输入: {data!r}"}
+
+
+TOOLS["send_input"] = {
+    "description": "向通过 run_command(wait=False) 启动的后台进程发送 stdin 输入（默认追加换行）。",
+    "parameters": {
+        "pid": {"type": "integer", "required": True, "description": "后台进程 PID"},
+        "data": {"type": "string", "required": True, "description": "要写入 stdin 的内容"},
+        "newline": {"type": "boolean", "required": False, "description": "是否自动追加换行，默认 True"},
+    },
+    "execute": tool_send_input,
+}
+
+
+def tool_close_input(pid):
+    """关闭后台进程的 stdin（相当于发送 EOF，可让交互式程序退出）。"""
+    session = _background_sessions.get(int(pid))
+    if not session:
+        raise RuntimeError(f"未找到 PID 为 {pid} 的后台会话")
+    session.close_input()
+    return {"success": True, "data": f"已关闭 PID {pid} 的 stdin"}
+
+
+TOOLS["close_input"] = {
+    "description": "关闭后台进程的 stdin（发送 EOF），常用于结束交互式程序的输入循环。",
+    "parameters": {
+        "pid": {"type": "integer", "required": True, "description": "后台进程 PID"},
+    },
+    "execute": tool_close_input,
+}
+
+
+def tool_read_output(pid, clear=True, wait=0.0):
+    """读取后台进程截至目前产生的输出。"""
+    session = _background_sessions.get(int(pid))
+    if not session:
+        raise RuntimeError(f"未找到 PID 为 {pid} 的后台会话")
+    if wait and wait > 0:
+        time.sleep(float(wait))
+    out, err = session.read_output(clear=clear)
+    combined = (out + err).strip()
+    status = "运行中" if session.is_running() else f"已退出（退出码 {session.process.returncode}）"
+    header = f"[PID {pid} · {status}]"
+    return f"{header}\n{truncate(combined or '(暂无新输出)')}"
+
+
+TOOLS["read_output"] = {
+    "description": "读取后台进程截至目前的 stdout/stderr。默认读取后清空缓存。",
+    "parameters": {
+        "pid": {"type": "integer", "required": True, "description": "后台进程 PID"},
+        "clear": {"type": "boolean", "required": False, "description": "是否清空缓存，默认 True"},
+        "wait": {"type": "number", "required": False, "description": "读取前额外等待秒数，默认 0"},
+    },
+    "execute": tool_read_output,
+}
+
+
+def tool_kill_background(pid):
+    """强制终止指定后台进程树。"""
+    pid = int(pid)
+    session = _background_sessions.get(pid)
+    if not session:
+        raise RuntimeError(f"未找到 PID 为 {pid} 的后台会话")
+    _kill_process_tree(session.process, pid)
+    return {"success": True, "data": f"已终止 PID {pid}"}
+
+
+TOOLS["kill_background"] = {
+    "description": "强制终止通过 run_command(wait=False) 启动的后台进程树。",
+    "parameters": {
+        "pid": {"type": "integer", "required": True, "description": "后台进程 PID"},
+    },
+    "execute": tool_kill_background,
+}
+
+
+def tool_list_background():
+    if not _background_sessions:
+        return "(无后台任务)"
+    lines = []
+    for pid, session in _background_sessions.items():
+        p = session.process
+        status = "运行中" if p.poll() is None else f"已退出（退出码 {p.returncode}）"
+        lines.append(f"PID {pid}: {status}")
+    return "\n".join(lines)
+
+
+TOOLS["list_background"] = {
+    "description": "列出当前所有后台任务及其状态。",
+    "parameters": {},
+    "execute": tool_list_background,
 }
 
 
@@ -359,7 +534,11 @@ if __name__ == "__main__":
             "ping -t 127.0.0.1", wait=False
         )
         print(result)
-        print(result)
+
+        # 从返回信息中提取 PID 后，演示发送输入（这里仅作演示）
+        # 例如:
+        #   print(tool_list_background())
+        #   print(tool_read_output(<pid>, wait=1))
+        #   print(tool_kill_background(<pid>))
 
     main()
-

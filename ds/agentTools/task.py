@@ -18,7 +18,7 @@ from typing import BinaryIO, List, Optional
 
 from ds.agentTools import TOOLS
 from ds.config import CONFIG
-from ds.utils import decode_bytes, wrap_powershell
+from ds.utils import decode_bytes, wrap_powershell, run_ssh_script
 
 # ---------- Windows Job Object 管理（所有后台进程共享同一个作业） ----------
 _job_handle = None
@@ -369,6 +369,59 @@ TOOLS["run_command"] = {
 }
 
 
+# ===== 通用远程执行（Windows + Linux 一套接口全包）=====
+
+def tool_ssh_exec(host, script=None, script_windows=None, script_posix=None,
+                  remote="auto", user=None, password=None,
+                  port=None, key_filename=None, timeout=120):
+    r = run_ssh_script(
+        host=host,
+        script=script,
+        script_windows=script_windows,
+        script_posix=script_posix,
+        remote=remote,
+        user=user,
+        password=password,
+        port=port,
+        key_filename=key_filename,
+        timeout=timeout,
+    )
+    out = (r["stdout"] + r["stderr"]).strip() or "(无输出)"
+    if r["exit_code"] != 0:
+        raise RuntimeError(f"远程执行失败（退出码 {r['exit_code']}）:\n{out}")
+    return out
+
+
+TOOLS["ssh_exec"] = {
+    "description": (
+        "在任意远程主机执行脚本，Windows 和 Linux/macOS 通吃。"
+        "推荐同时给 script_windows（PowerShell）和 script_posix（sh），"
+        "工具会自动探测远端系统并跑对应那套，调用方无需关心对面是什么 OS。"
+        "也可只给 script，配合 remote 指定 'windows'/'posix'（或 'auto' 自动探测）。"
+        "脚本经 base64 传输，引号/$/中文/换行均安全。"
+        "认证自动降级 plink -pw / sshpass -p / SSH_ASKPASS / 原生密钥。"
+    ),
+    "parameters": {
+        "host": {"type": "string", "required": True,
+                 "description": "ssh 别名或 ip（可含 user@）"},
+        "script": {"type": "string", "required": False,
+                   "description": "通用脚本；配合 remote 使用"},
+        "script_windows": {"type": "string", "required": False,
+                           "description": "PowerShell 脚本（远端为 Windows 时用）"},
+        "script_posix": {"type": "string", "required": False,
+                         "description": "sh 脚本（远端为 Linux/macOS 时用）"},
+        "remote": {"type": "string", "required": False,
+                   "description": "'auto'（默认）|'windows'|'posix'（兼容 linux/unix/mac 等别名）"},
+        "user": {"type": "string", "required": False, "description": "用户名（可省）"},
+        "password": {"type": "string", "required": False, "description": "密码（可选）"},
+        "port": {"type": "number", "required": False, "description": "端口，默认 22"},
+        "key_filename": {"type": "string", "required": False, "description": "私钥路径"},
+        "timeout": {"type": "number", "required": False, "description": "超时秒，默认 120"},
+    },
+    "execute": tool_ssh_exec,
+}
+
+
 # ===== 后台任务交互工具 =====
 
 def tool_send_input(pid, data, newline=True):
@@ -527,15 +580,13 @@ TOOLS["abort_task"] = {
 
 if __name__ == "__main__":
     def main():
-        result = tool_run_command(
-            "ping -t 127.0.0.1", wait=False
-        )
-        print(result)
-
-        # 从返回信息中提取 PID 后，演示发送输入（这里仅作演示）
-        # 例如:
-        #   print(tool_list_background())
-        #   print(tool_read_output(<pid>, wait=1))
-        #   print(tool_kill_background(<pid>))
+        cmd = r"python D:\0.0\temp\dstmp\exec_remote.py D:\0.0\temp\dstmp\wan_diag.ps1 w"
+        print("=" * 50)
+        print(f"[命令] {cmd}")
+        print("=" * 50)
+        try:
+            print(tool_run_command(cmd, timeout=90))
+        except Exception as e:
+            print(f"[异常] {e}")
 
     main()

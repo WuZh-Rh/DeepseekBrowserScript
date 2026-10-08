@@ -27,10 +27,18 @@ def parse_args():
     argv = sys.argv[1:]
 
     # 只有当第一个位置参数是 resume/continue/r 时，才启用 argparse 子命令；
-    # 否则裸任务文本（如 ds "写个脚本"）会与子命令冲突。
-    _VALUE_OPTS = {"-t", "--task", "-d", "--dir", "--work-dir", "--test-bat",
-                   "--log-path", "--roll-name", "-m", "--max-iterations",
-                   "-S", "--session-dir", "--task-path", "--load-file"}
+    _VALUE_OPTS = {
+        "-t", "--task",
+        "-d", "--dir", "--work-dir",
+        "--test-bat",
+        "--log-path", "--roll-name",
+        "-m", "--max-iterations",
+        "-S", "--session-dir",
+        "--task-path", "--load-file",
+        "--mode",
+    }
+    # 多值选项（nargs='+'）
+    _MULTI_VALUE_OPTS = {"--deny-tools", "--ext-tools"}
 
     def first_positional(tokens):
         i = 0
@@ -41,6 +49,10 @@ def parse_args():
             if t.startswith("-") and t != "-":
                 if "=" in t:
                     i += 1
+                elif t in _MULTI_VALUE_OPTS:
+                    i += 1
+                    while i < len(tokens) and not tokens[i].startswith("-"):
+                        i += 1
                 elif t in _VALUE_OPTS:
                     i += 2
                 else:
@@ -49,14 +61,10 @@ def parse_args():
                 return t
         return None
 
-    fp = first_positional(argv)
-    use_sub = fp is not None and fp.lower() in ("resume", "continue", "r")
-
-    # 全局参数定义。主 parser 用正常默认值；子 parser 用 SUPPRESS 默认值，
-    # 这样当参数出现在子命令之前时，主 parser 的结果不会被子 parser 覆盖。
     def _add_common(p, suppress):
         def d(v):
             return argparse.SUPPRESS if suppress else v
+
         p.add_argument("-t", "--task", default=d(None), help="要运行的任务")
         p.add_argument("-i", "--interactive", action="store_true", default=d(False),
                        help="交互式 REPL 模式")
@@ -88,34 +96,62 @@ def parse_args():
         formatter_class=argparse.RawDescriptionHelpFormatter,
         parents=[main_common],
         epilog="""
-示例:
-  python -m ds "写一个 Hello World"
-  python -m ds --interactive
-  python -m ds -S test "构建项目"
+    示例:
+      python -m ds "写一个 Hello World"
+      python -m ds --interactive
+      python -m ds -S test "构建项目"
 
-子命令:
-  python -m ds resume                 # 衔接最近一次对话，读页面最后一条消息继续
-  python -m ds resume -I 1            # 衔接侧边栏索引为 1 的对话，继续
-  python -m ds resume -T 爬虫          # 衔接标题含“爬虫”的对话，继续
-  python -m ds resume "新任务"         # 衔接最近一次对话，并发起新任务
+    子命令:
+      python -m ds resume                 # 衔接最近一次对话，读页面最后一条消息继续
+      python -m ds resume -I 1            # 衔接侧边栏索引为 1 的对话，继续
+      python -m ds resume -T 爬虫          # 衔接标题含“爬虫”的对话，继续
+      python -m ds resume "新任务"         # 衔接最近一次对话，并发起新任务
 
-注意：全局参数（-S/-d/-m/--mode 等）在子命令前后都可以用。
-        """,
+    注意：全局参数（-S/-d/-m/--mode 等）在子命令前后都可以用。
+            """,
     )
 
-    if use_sub:
-        subparsers = parser.add_subparsers(dest="command", metavar="{resume}")
-        p_resume = subparsers.add_parser(
-            "resume", aliases=["continue", "r"], parents=[sub_common],
-            help="衔接历史对话（不新建）。省略任务时直接读页面最后一条消息继续。",
-        )
-        p_resume.add_argument("-I", "--index", dest="resume_index", type=int, default=None,
-                              help="侧边栏索引（0 为最近一次）")
-        p_resume.add_argument("-T", "--title", dest="resume_title", default=None,
-                              help="标题片段（匹配侧边栏对话标题）")
-        p_resume.add_argument("resume_task", nargs="*", default=[],
-                              help="衔接后要发送的任务；省略则直接读页面最后一条消息继续")
-        args = parser.parse_args()
+    # 始终注册 subparsers —— usage 里永远有 {resume}
+    subparsers = parser.add_subparsers(dest="command", metavar="{resume}")
+
+    p_resume = subparsers.add_parser(
+        "resume", aliases=["continue", "r"], parents=[sub_common],
+        help="衔接历史对话（不新建）。省略任务时直接读页面最后一条消息继续。",
+    )
+    p_resume.add_argument("-I", "--index", dest="resume_index", type=int, default=None,
+                          help="侧边栏索引（0 为最近一次）")
+    p_resume.add_argument("-T", "--title", dest="resume_title", default=None,
+                          help="标题片段（匹配侧边栏对话标题）")
+    p_resume.add_argument("resume_task", nargs="*", default=[],
+                          help="衔接后要发送的任务；省略则直接读页面最后一条消息继续")
+
+    # 隐藏子命令 _run：承载“裸任务文本”模式，help=SUPPRESS 让它不出现在列表里
+    p_run = subparsers.add_parser(
+        "_run", parents=[sub_common], help=argparse.SUPPRESS,
+        prog="ds",
+        usage="%(prog)s [-h] [全局参数] [任务文本...]\n"
+              "       %(prog)s [-h] [全局参数] resume [-I N | -T 标题] [任务文本...]",
+    )
+    p_run.add_argument("rest", nargs="*", default=[])
+
+    # 决定是否把 argv 包装成 _run 调用：
+    #   - 想打印主 help：不包装（让主 parser 出 help）
+    #   - 第一个位置参数不是 resume/continue/r：包装成 _run
+    want_help = any(t in ("-h", "--help") for t in argv)
+    fp = first_positional(argv)
+    use_run = (not want_help) and (
+        fp is None or fp.lower() not in ("resume", "continue", "r")
+    )
+
+    if use_run:
+        argv = ["_run"] + argv
+
+    args = parser.parse_args(argv)
+
+    if args.command == "_run":
+        args.resume = None
+        args.rest = list(args.rest)
+    elif args.command in ("resume", "continue", "r"):
         if args.resume_index is not None and args.resume_title is not None:
             parser.error("resume: --index 与 --title 不能同时使用")
         if args.resume_index is not None:
@@ -128,10 +164,8 @@ def parse_args():
             args.resume = "__latest__"
         args.rest = list(args.resume_task)
     else:
-        parser.add_argument("rest", nargs="*", help="任务文本")
-        args = parser.parse_args()
         args.resume = None
-        args.rest = list(args.rest)
+        args.rest = list(getattr(args, "rest", []))
 
     return args
 

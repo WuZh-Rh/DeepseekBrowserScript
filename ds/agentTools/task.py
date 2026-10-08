@@ -18,7 +18,7 @@ from typing import BinaryIO, List, Optional
 
 from ds.agentTools import TOOLS
 from ds.config import CONFIG
-from ds.utils import decode_bytes
+from ds.utils import decode_bytes, wrap_powershell
 
 # ---------- Windows Job Object 管理（所有后台进程共享同一个作业） ----------
 _job_handle = None
@@ -195,65 +195,52 @@ def _kill_process_tree(process, pid):
             process.kill()
 
 
-def _fix_windows_start_command(command):
-    """
-    在 Windows 下自动修复 start 命令：若命令以 'start' 开头且缺少标题参数，
-    则在 /B 后插入空标题 ""，避免被误解为窗口标题。
-    """
-    if sys.platform != "win32":
-        return command
-
-    # 分割命令（保留引号）
-    import shlex
-    parts = shlex.split(command, posix=False)
-    if not parts or parts[0].lower() != "start":
-        return command
-
-    # 如果命令只有 "start"，或已经带有标题（以非选项开头），不做强制插入
-    # 但为了安全，统一在第一个选项之后插入空标题
-    # 查找第一个选项（以 / 或 - 开头）
-    opt_index = -1
-    for i, part in enumerate(parts[1:], start=1):
-        if part.startswith('/') or part.startswith('-'):
-            opt_index = i
-            break
-
-    if opt_index == -1:
-        # 没有选项：直接插入空标题在命令前
-        parts.insert(1, "")
-    else:
-        # 在选项之后插入空标题（如果该位置已经有一个参数且不是选项，则认为是已有标题，不覆盖）
-        # 但为保险，仍插入空标题（因为已有的可能被误解）
-        # 检查 opt_index+1 是否越界，或下一个参数不是选项
-        if len(parts) <= opt_index + 1:
-            parts.insert(opt_index + 1, "")
-        else:
-            next_part = parts[opt_index + 1]
-            # 如果下一个参数不是选项，则它可能被误认为标题，我们强制插入空标题并后移
-            if not (next_part.startswith('/') or next_part.startswith('-')):
-                parts.insert(opt_index + 1, "")
-            else:
-                # 如果下一个参数是选项，则说明后面没有标题，直接插入空标题
-                parts.insert(opt_index + 1, "")
-
-    return " ".join(parts)
-
-
 # 11. run_command
-def tool_run_command(command, cwd=None, timeout=60, env=None, wait=True):
+def tool_run_command(command, cwd=None, timeout=60, env=None, wait=True, shell=None):
     """
     执行 shell 命令并返回其输出。默认在工作目录中运行。
 
     参数：
+        command: 要执行的命令。当 shell=False 时必须是 list/tuple。
+        shell:   控制命令的包装方式，默认 None（自动）。
+                 - None : Windows 走 PowerShell -EncodedCommand（绕开 cmd 解析），
+                          POSIX 走 /bin/sh -c。
+                 - True : 强制使用系统默认 shell（Windows 上是 cmd.exe /c），
+                          适合确实需要 cmd 内建命令（dir/type/copy 等）的场景。
+                 - False: 不做任何 shell 包装，command 必须是 list/tuple，
+                          直接交给 subprocess.Popen，跨平台行为最干净。
         wait (bool): 是否等待命令结束并获取输出。
                      若为 False，则命令在后台运行，工具立即返回启动信息，
                      并通过会话 ID（PID）支持后续 send_input / read_output /
                      close_input / kill_background 等交互。
                      默认为 True，保持原有行为。
     """
-    # 自动修复 Windows start 命令
-    if sys.platform == "win32":
-        command = _fix_windows_start_command(command)
+    # ---------- 规范化 command / shell ----------
+    if shell is False:
+        if isinstance(command, (str, bytes)):
+            raise ValueError(
+                "shell=False 时 command 必须是 list 或 tuple，"
+                "例如 ['git', 'commit', '-m', 'feat: x']"
+            )
+        cmd_args = [str(x) for x in command]
+        use_shell = False
+    elif shell is True:
+        if not isinstance(command, str):
+            raise ValueError("shell=True 时 command 必须是字符串")
+        cmd_args = command
+        use_shell = True
+    else:  # shell is None -> 自动
+        if not isinstance(command, str):
+            raise ValueError(
+                "自动模式（shell=None）下 command 必须是字符串；"
+                "若想直接 exec 参数列表请显式传 shell=False"
+            )
+        if sys.platform == "win32":
+            cmd_args = wrap_powershell(command)
+            use_shell = False
+        else:
+            cmd_args = command
+            use_shell = True
 
     work_dir = resolve_path(cwd) if cwd else CONFIG["WORKING_DIR"]
     env_vars = {**os.environ, **(env or {})}
@@ -267,9 +254,8 @@ def tool_run_command(command, cwd=None, timeout=60, env=None, wait=True):
             _kill_process_tree(process, process.pid)
 
     try:
-        # 创建进程
         pop_kwargs = dict(
-            shell=True,
+            shell=use_shell,
             cwd=work_dir,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
@@ -284,37 +270,31 @@ def tool_run_command(command, cwd=None, timeout=60, env=None, wait=True):
         else:
             pop_kwargs["start_new_session"] = True
 
-        process = subprocess.Popen(command, **pop_kwargs)
+        process = subprocess.Popen(cmd_args, **pop_kwargs)
 
         # 如果不等待，则直接返回（不启动定时器，不调用 communicate）
         if not wait:
-            # 使用作业对象（Windows 强制终止时清理）
+            # ... 以下与原实现完全一致，保持不变 ...
             if sys.platform == "win32":
                 _init_job_object()
                 if _job_handle:
                     kernel32 = ctypes.windll.kernel32
                     pid = process.pid
-                    # 必须拥有 PROCESS_SET_QUOTA (0x0100) 和 PROCESS_TERMINATE (0x0001)
-                    desired = 0x0100 | 0x0001 | 0x0400  # 含 QUERY_INFORMATION 便于调试
+                    desired = 0x0100 | 0x0001 | 0x0400
                     handle = kernel32.OpenProcess(desired, False, pid)
                     if handle:
                         ret = kernel32.AssignProcessToJobObject(_job_handle, handle)
                         kernel32.CloseHandle(handle)
-                        # 若 ret=0，作业对象分配失败，但 atexit 会兜底
                         if not ret:
-                            # 可选：记录日志，不影响执行
                             from ds.logger import LOGGER
-                            LOGGER.warn(f"AssignProcessToJobObject 失败 (PID: {pid})，将依赖 atexit 清理")
-                    else:
-                        # 无法打开进程句柄，静默忽略
-                        pass
+                            LOGGER.warn(
+                                f"AssignProcessToJobObject 失败 (PID: {pid})，将依赖 atexit 清理"
+                            )
 
-            # 创建会话并登记（支持后续 send_input / read_output / close_input / kill）
             session = _BGSession(process)
             _background_sessions[process.pid] = session
             _background_processes.append(process)
 
-            # 后备清理：父进程正常退出时（含 Ctrl+C）杀死所有后台进程
             global _atexit_registered
             if not _atexit_registered:
                 atexit.register(_cleanup_background_processes)
@@ -331,15 +311,12 @@ def tool_run_command(command, cwd=None, timeout=60, env=None, wait=True):
         timer.daemon = True
         timer.start()
 
-        # 等待进程结束
         stdout_b, stderr_b = process.communicate()
         timer.cancel()
 
-        # 智能解码：UTF-8 → GBK → 逐行探测
         stdout = decode_bytes(stdout_b or b"")
         stderr = decode_bytes(stderr_b or b"")
 
-        # 若因超时而强杀，抛出异常
         if timed_out.is_set():
             output = stdout + stderr
             raise RuntimeError(
@@ -358,25 +335,35 @@ def tool_run_command(command, cwd=None, timeout=60, env=None, wait=True):
         raise RuntimeError(f"命令执行错误: {e}")
 
     finally:
-        # 确保进程被清理（若因异常未终止且 wait=True 或进程还在运行）
         if wait and process and process.poll() is None:
             _kill_process_tree(process, process.pid)
-        # 若 wait=False，不清理，让进程在后台继续
 
 
 # ===== 更新 TOOLS["run_command"] 定义 =====
 TOOLS["run_command"] = {
     "description": (
         "执行 shell 命令并返回其输出。默认在工作目录中运行。"
-        "若设置 wait=False，则命令在后台运行，工具会立即返回 PID，"
+        "shell 参数控制命令的包装方式：默认（不传）时 Windows 走 PowerShell "
+        "（-EncodedCommand，绕开 cmd 的引号解析），POSIX 走 /bin/sh -c；"
+        "shell=True 强制使用系统默认 shell（Windows 上是 cmd.exe）；"
+        "shell=False 则把 command 当作参数列表直接 exec，不做任何 shell 包装。"
+        "若设置 wait=False，命令在后台运行，工具立即返回 PID，"
         "后续可用 send_input / read_output / close_input / kill_background 与之交互。"
     ),
     "parameters": {
-        "command": {"type": "string", "required": True, "description": "要执行的 shell 命令"},
+        "command": {"type": "string", "required": True,
+                    "description": "要执行的命令。shell=False 时必须传入字符串数组"},
         "cwd": {"type": "string", "required": False, "description": "命令的工作目录"},
-        "timeout": {"type": "number", "required": False, "description": "超时时间（秒），默认 60，仅当 wait=True 时有效"},
+        "timeout": {"type": "number", "required": False,
+                    "description": "超时时间（秒），默认 60，仅当 wait=True 时有效"},
         "env": {"type": "object", "required": False, "description": "额外的环境变量（键值对）"},
-        "wait": {"type": "boolean", "required": False, "description": "是否等待命令完成并返回输出，默认 True。设为 False 时命令后台运行，立即返回 PID。"},
+        "wait": {"type": "boolean", "required": False,
+                 "description": "是否等待命令完成并返回输出，默认 True。"
+                                "设为 False 时命令后台运行，立即返回 PID。"},
+        "shell": {"type": "boolean", "required": False,
+                  "description": "命令包装方式。不传=自动（推荐）；"
+                                 "True=使用系统默认 shell（Windows 上是 cmd）；"
+                                 "False=直接 exec 参数列表（command 需为数组）。"},
     },
     "execute": tool_run_command,
 }

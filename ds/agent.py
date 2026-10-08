@@ -10,11 +10,13 @@ import sys
 import subprocess
 import traceback
 from pathlib import Path
+
 from ds.config import CONFIG
 from ds.logger import LOGGER
 from ds.browser import DeepSeekBrowser
 from ds.agentTools import execute_tool
 from ds.prompt import ConversationManager
+from ds.utils import decode_bytes
 
 
 def _get_prompt():
@@ -118,13 +120,14 @@ class DeepSeekAgent:
                 shell=True,
                 cwd=CONFIG["WORKING_DIR"],
                 capture_output=True,
-                text=True,
                 env=env,
             )
+            stdout = decode_bytes(result.stdout or b"")
+            stderr = decode_bytes(result.stderr or b"")
             if result.returncode == 0:
-                return {"passed": True, "output": result.stdout.strip() or "(无输出)"}
+                return {"passed": True, "output": stdout.strip() or "(无输出)"}
             else:
-                return {"passed": False, "output": (result.stdout + "\n" + result.stderr).strip()}
+                return {"passed": False, "output": (stdout + "\n" + stderr).strip()}
         except Exception as e:
             return {"passed": False, "output": str(e)}
 

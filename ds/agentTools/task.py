@@ -14,9 +14,11 @@ import time
 from pathlib import Path
 import ctypes
 from ctypes import wintypes
+from typing import BinaryIO, List, Optional
 
 from ds.agentTools import TOOLS
 from ds.config import CONFIG
+from ds.utils import decode_bytes
 
 # ---------- Windows Job Object 管理（所有后台进程共享同一个作业） ----------
 _job_handle = None
@@ -39,7 +41,7 @@ class _BGSession:
         self._start_reader(process.stdout, self.stdout_chunks)
         self._start_reader(process.stderr, self.stderr_chunks)
 
-    def _start_reader(self, stream, buffer):
+    def _start_reader(self, stream: Optional[BinaryIO], buffer: List[str]):
         if stream is None:
             return
 
@@ -49,11 +51,9 @@ class _BGSession:
                     chunk = stream.readline()
                     if not chunk:
                         break
+                    text = decode_bytes(chunk)  # bytes -> str
                     with self.lock:
-                        buffer.append(chunk)
-            except UnicodeDecodeError:
-                # 单个字符解码失败不应该杀死线程
-                pass
+                        buffer.append(text)
             except Exception:
                 pass
 
@@ -80,7 +80,7 @@ class _BGSession:
         if newline and not s.endswith("\n"):
             s += "\n"
         try:
-            self.process.stdin.write(s)
+            self.process.stdin.write(s.encode('utf-8'))  # str -> bytes
             self.process.stdin.flush()
         except Exception as e:
             raise RuntimeError(f"写入 stdin 失败: {e}")
@@ -273,8 +273,6 @@ def tool_run_command(command, cwd=None, timeout=60, env=None, wait=True):
             cwd=work_dir,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
-            encoding='utf-8',
-            errors='replace',          # 遇到非法字节用 � 代替，不再抛异常
             env=env_vars,
         )
         # 只有后台模式才需要可写 stdin
@@ -334,18 +332,22 @@ def tool_run_command(command, cwd=None, timeout=60, env=None, wait=True):
         timer.start()
 
         # 等待进程结束
-        stdout, stderr = process.communicate()
+        stdout_b, stderr_b = process.communicate()
         timer.cancel()
 
-        # 兜底：communicate 在极少数情况下可能返回 None
-        stdout = stdout or ""
-        stderr = stderr or ""
-        output = stdout + stderr
+        # 智能解码：UTF-8 → GBK → 逐行探测
+        stdout = decode_bytes(stdout_b or b"")
+        stderr = decode_bytes(stderr_b or b"")
 
         # 若因超时而强杀，抛出异常
         if timed_out.is_set():
-            raise RuntimeError(f"最后输出：\n{truncate(output or '无输出')}\n命令执行超时（{timeout} 秒），已被强制终止")
+            output = stdout + stderr
+            raise RuntimeError(
+                f"最后输出：\n{truncate(output or '无输出')}\n"
+                f"命令执行超时（{timeout} 秒），已被强制终止"
+            )
 
+        output = stdout + stderr
         if process.returncode != 0:
             raise RuntimeError(
                 f"命令执行失败（退出码 {process.returncode}）：\n{truncate(output or '无输出')}"
@@ -498,11 +500,11 @@ def tool_run_test():
             shell=True,
             cwd=CONFIG["WORKING_DIR"],
             capture_output=True,
-            encoding='utf-8',
-            errors='replace',
             env={**os.environ, "DSA_LOG_FILE": os.environ.get("DSA_LOG_FILE", "")}
         )
-        output = (result.stdout or "") + "\n" + (result.stderr or "")
+        stdout = decode_bytes(result.stdout or b"")
+        stderr = decode_bytes(result.stderr or b"")
+        output = stdout + "\n" + stderr
         lines = output.splitlines()
         last_hundred = "\n".join(lines[-100:])
         if result.returncode == 0:

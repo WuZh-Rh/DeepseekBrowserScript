@@ -11,36 +11,60 @@ import shutil
 import stat
 import tempfile
 
+# 按优先级排列的候选编码。前面的匹配上了就不再看后面的。
+_DECODE_CANDIDATES = (
+    'utf-8',
+    'gbk',
+    'utf-16-le',
+    'utf-16-be',
+    'utf-16',
+    'big5',
+    'shift_jis',
+    'latin-1',
+)
+
 
 def decode_line(line: bytes) -> str:
     if not line:
         return ""
-    try:
-        return line.decode('utf-8')
-    except UnicodeDecodeError:
-        pass
-    try:
-        return line.decode('gbk')
-    except UnicodeDecodeError:
-        pass
-    u8 = line.decode('utf-8', errors='replace')
-    gb = line.decode('gbk', errors='replace')
-    return u8 if u8.count('\ufffd') <= gb.count('\ufffd') else gb
+    for enc in _DECODE_CANDIDATES:
+        try:
+            return line.decode(enc)
+        except (UnicodeDecodeError, LookupError):
+            continue
+    # 全部失败，用替换字符最少的那个
+    best = None
+    best_bad = None
+    for enc in _DECODE_CANDIDATES:
+        try:
+            s = line.decode(enc, errors='replace')
+        except LookupError:
+            continue
+        bad = s.count('\ufffd')
+        if best is None or bad < best_bad:
+            best, best_bad = s, bad
+            if bad == 0:
+                break
+    return best if best is not None else line.decode('utf-8', errors='replace')
 
 
 def decode_bytes(data: bytes) -> str:
     if not data:
         return ""
+    # BOM 优先
     if data.startswith(b'\xef\xbb\xbf'):
-        data = data[3:]
-    try:
-        return data.decode('utf-8')
-    except UnicodeDecodeError:
-        pass
-    try:
-        return data.decode('gbk')
-    except UnicodeDecodeError:
-        pass
+        return data[3:].decode('utf-8', errors='replace')
+    if data.startswith(b'\xff\xfe'):
+        return data[2:].decode('utf-16-le', errors='replace')
+    if data.startswith(b'\xfe\xff'):
+        return data[2:].decode('utf-16-be', errors='replace')
+    # 整段尝试
+    for enc in _DECODE_CANDIDATES:
+        try:
+            return data.decode(enc)
+        except (UnicodeDecodeError, LookupError):
+            continue
+    # 逐行兜底
     return '\n'.join(decode_line(p) for p in data.split(b'\n'))
 
 

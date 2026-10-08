@@ -265,12 +265,12 @@ class DeepSeekBrowser:
         appeared = False
         while time.time() - start < 12:
             prompts = self._get_prompt_texts(conversation)
-            if any("达到对话长度上限" in prompt for prompt in prompts):
+            if any("达到对话长度上限" in prompt for prompt in prompts if len(prompt) < 20):
                 raise RuntimeError("对话达到长度限制")
             retry_count = -1
             retry_fail = 0
             for retry_count in range(99, -1, -1):
-                if not any("消息发送过于频繁" in prompt for prompt in prompts):
+                if not any("消息发送过于频繁" in prompt for prompt in prompts if len(prompt) < 20):
                     break
                 LOGGER.warn(f"消息发送过于频繁 正在进行第{100-retry_count}/100次重试")
                 click = click_retry()

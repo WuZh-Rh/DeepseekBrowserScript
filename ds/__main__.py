@@ -194,6 +194,17 @@ def main():
         session_dir.mkdir(parents=True, exist_ok=True)
         CONFIG["SESSION_DIR"] = str(session_dir)
         LOGGER.info(f"会话目录已指定: {CONFIG['SESSION_DIR']}\\main")
+
+    # ---------- 会话占用检查 ----------
+    from ds.session_lock import acquire_session_lock, SessionLockError
+    try:
+        acquire_session_lock(CONFIG["SESSION_DIR"])
+    except SessionLockError as e:
+        LOGGER.error(str(e))
+        sys.exit(2)
+    LOGGER.info(f"会话锁已获取: {CONFIG['SESSION_DIR']}")
+    # -----------------------------------
+
     CONFIG["PROMPT_FILE"] = (Path("prompt") / (args.session_dir + ".txt")).resolve()
     if not Path(CONFIG["PROMPT_FILE"]).exists():
         Path(CONFIG["PROMPT_FILE"]).touch()

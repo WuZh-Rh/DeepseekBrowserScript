@@ -26,6 +26,14 @@ class DeepSeekBrowser:
         self._closed = False
 
     def launch(self):
+        # ---------- 会话占用检查 ----------   ← 新增
+        from ds.session_lock import acquire_session_lock, SessionLockError
+        try:
+            acquire_session_lock(CONFIG["SESSION_DIR"])
+        except SessionLockError as e:
+            LOGGER.error(str(e))
+            raise
+        # -----------------------------------
         LOGGER.info("正在启动浏览器，使用持久化会话...")
         self.playwright = sync_playwright().start()
         session_dir = Path(CONFIG["SESSION_DIR"]) / "main"

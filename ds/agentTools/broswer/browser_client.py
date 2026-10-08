@@ -58,6 +58,11 @@ class BrowserClient:
         if self._started:
             return
         from ds.config import CONFIG
+        from ds.session_lock import acquire_session_lock, SessionLockError
+        try:
+            acquire_session_lock(CONFIG["SESSION_DIR"])
+        except SessionLockError as e:
+            raise RuntimeError(str(e))
         self.process = multiprocessing.Process(
             target=_run_browser_service,
             args=(self.command_queue, self.result_queue, CONFIG),

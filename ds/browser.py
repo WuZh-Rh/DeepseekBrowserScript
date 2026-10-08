@@ -299,6 +299,8 @@ class DeepSeekBrowser:
             text = self._extract_last_message()
             if text in [i["content"] for i in conversation.messages]:
                 continue
+            if text == "":
+                continue
             if text != last_text:
                 last_text = text
                 stable_start = None
@@ -338,25 +340,53 @@ class DeepSeekBrowser:
         """)
 
     def _extract_last_message(self):
+        msgs = self.get_messages()
+        if msgs[-1]["role"] == "assistant":
+            return msgs[-1]["content"]
+        return ""
+
+    def get_messages(self):
+        """
+        获取当前对话所有消息，格式与 ConversationManager.messages 一致：
+            [{"role": "user"|"assistant", "content": str}, ...]
+        助手消息自动拼接思考 + 输出，与 _extract_last_message 输出格式保持一致。
+        """
         return self.page.evaluate("""
             () => {
-                const thinks = document.querySelectorAll('.ds-think-content');
-                if (!thinks.length) return '';
-                const thinkEl = thinks[thinks.length - 1];
-                const msgEl = thinkEl.closest('.ds-message, [data-role="assistant"]');
-                if (!msgEl) return thinkEl.textContent.trim();
-                const thinking = thinkEl.textContent.trim();
-                const clone = msgEl.cloneNode(true);
-                const ct = clone.querySelector('.ds-think-content');
-                if (ct) ct.remove();
-                const answer = clone.textContent.trim();
-                if (thinking && answer) {
-                    return '【思考】\\n' + thinking + '\\n\\n【输出】\\n' + answer;
-                } else if (thinking) {
-                    return thinking;
-                } else {
-                    return answer;
+                const nodes = document.querySelectorAll(
+                    '.fbb737a4, .ds-assistant-message-main-content'
+                );
+                const result = [];
+                for (const el of nodes) {
+                    if (el.classList.contains('fbb737a4')) {
+                        const content = el.textContent.trim();
+                        if (content) result.push({ role: 'user', content });
+                        continue;
+                    }
+                    // 助手消息
+                    const msgEl = el.closest('.ds-message') || el;
+                    const thinking = Array.from(
+                        msgEl.querySelectorAll('.ds-think-content')
+                    ).map(x => x.textContent.trim()).filter(Boolean).join('\\n');
+
+                    const clone = el.cloneNode(true);
+                    clone.querySelectorAll(
+                        '.ds-think-content, .md-code-block-banner-wrap, ' +
+                        '.ds-button, button, [role="button"], svg'
+                    ).forEach(x => x.remove());
+                    const answer = clone.textContent.trim();
+
+                    let content;
+                    if (thinking && answer) {
+                        content = '【思考】\\n' + thinking + '\\n\\n【输出】\\n' + answer;
+                    } else if (thinking) {
+                        content = thinking;
+                    } else {
+                        content = answer;
+                    }
+                    if (content) result.push({ role: 'assistant', content });
                 }
+                return result;
             }
         """)
 

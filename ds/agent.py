@@ -41,6 +41,8 @@ class DeepSeekAgent:
     def init(self):
         self.browser.launch()
         self.browser.new_chat()
+        from ds.agentTools import set_browser
+        set_browser(self.browser)
 
     def shutdown(self):
         self.browser.close()

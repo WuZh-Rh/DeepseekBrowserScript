@@ -8,6 +8,17 @@
 from ds.config import CONFIG
 
 TOOLS = {}
+_BROWSER = None
+
+
+def set_browser(browser):
+    """由 DeepSeekAgent.init() 调用，把 browser 注入工具系统。"""
+    global _BROWSER
+    _BROWSER = browser
+
+
+def get_browser():
+    return _BROWSER
 
 
 def init_tools():

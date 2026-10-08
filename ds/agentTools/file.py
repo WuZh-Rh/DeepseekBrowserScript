@@ -13,7 +13,7 @@ from pathlib import Path
 
 import requests
 
-from ds.agentTools import TOOLS
+from ds.agentTools import TOOLS, get_browser
 from ds.config import CONFIG
 
 
@@ -469,4 +469,78 @@ TOOLS["write_files"] = {
         "files": {"type": "array", "required": True, "description": "{path, content} 对象的数组"},
     },
     "execute": tool_write_files,
+}
+
+
+# 16. load_file
+
+# 需要二次确认的体积上限（超过则首次拒绝）
+LOAD_FILE_CONFIRM_THRESHOLD = 1 * 1024 * 1024  # 1 MB
+# 上一次因体积过大被拒绝的文件路径；下次对同一路径调用直接放行
+_PENDING_LARGE_FILE = None
+
+
+def tool_load_file(path, selector=None):
+    """
+    通过浏览器把本地文件上传到当前 DeepSeek 对话。
+    相当于用户点击附件按钮选择文件。
+
+    超过 1 MB 的文件：第一次调用会被拒绝并记录该路径，
+    再次调用同一路径时直接放行。
+    """
+    global _PENDING_LARGE_FILE
+
+    browser = get_browser()
+    if browser is None:
+        raise RuntimeError("浏览器尚未初始化，无法加载文件。")
+
+    if CONFIG.get("MODE") == "expert":
+        raise RuntimeError("专家模式下不支持文件上传。")
+
+    abs_path = resolve_path(path)
+    if not os.path.exists(abs_path):
+        raise FileNotFoundError(f"文件不存在：{abs_path}")
+    if os.path.isdir(abs_path):
+        raise IsADirectoryError(f"{abs_path} 是一个目录，不能上传")
+
+    # ---- 体积检查：超过 1 MB 需要二次确认 ----
+    size = os.path.getsize(abs_path)
+    if size > LOAD_FILE_CONFIRM_THRESHOLD:
+        if _PENDING_LARGE_FILE != abs_path:
+            _PENDING_LARGE_FILE = abs_path
+            raise RuntimeError(
+                f"⚠ 文件体积较大：{format_bytes(size)}（上限 1.0 MB）。"
+                f"\n如确认要上传，请再次调用 load_file 并传入相同的 path。"
+                f"\n若不希望上传，请改用其他方式（如 read_file 分段读取后写入任务描述）。"
+            )
+        # 同一路径第二次调用，放行并清空待确认状态
+        _PENDING_LARGE_FILE = None
+
+    try:
+        browser.load_file(abs_path, selector=selector)
+    except Exception as e:
+        raise RuntimeError(f"加载文件失败: {e}")
+
+    return {"success": True, "data": f"✓ 已加载文件：{abs_path}（{format_bytes(size)}）"}
+
+
+TOOLS["load_file"] = {
+    "description": (
+        "把本地文件上传/加载到当前 DeepSeek 对话（相当于点击附件按钮选择文件）。"
+        "当任务需要让模型直接看到某个文件内容时调用。"
+        "注意：文件超过 1 MB 时首次调用会被拒绝，再次对同一路径调用即可通过。"
+    ),
+    "parameters": {
+        "path": {
+            "type": "string",
+            "required": True,
+            "description": "要上传的文件路径（相对于工作目录，或绝对路径）",
+        },
+        # "selector": {
+        #     "type": "string",
+        #     "required": False,
+        #     "description": "可选的 input[type='file'] CSS 选择器；不填则自动探测",
+        # },
+    },
+    "execute": tool_load_file,
 }

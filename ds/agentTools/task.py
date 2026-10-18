@@ -151,6 +151,73 @@ def _init_job_object():
         _job_handle = None
 
 
+# ---------- 单次 wait=True 调用用的独立 Job Object ----------
+
+def _create_job_object():
+    """为单次 wait=True 调用创建独立 Job Object（仅 Windows），失败返回 None。"""
+    if sys.platform != "win32":
+        return None
+    try:
+        kernel32 = ctypes.windll.kernel32
+        job = kernel32.CreateJobObjectW(None, None)
+        if not job:
+            return None
+        info = _JOBOBJECT_BASIC_LIMIT_INFORMATION()
+        info.PerProcessUserTimeLimit = 0
+        info.PerJobUserTimeLimit = 0
+        info.LimitFlags = 0x2000  # JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE
+        info.MinimumWorkingSetSize = 0
+        info.MaximumWorkingSetSize = 0
+        info.ActiveProcessLimit = 0
+        info.Affinity = 0
+        info.PriorityClass = 0
+        info.SchedulingClass = 0
+        if not kernel32.SetInformationJobObject(
+            job, 2, ctypes.byref(info), ctypes.sizeof(info)
+        ):
+            kernel32.CloseHandle(job)
+            return None
+        return job
+    except Exception:
+        return None
+
+
+def _assign_process_to_job(job, pid):
+    """把进程加入 Job Object；失败返回 False（例如进程已在其它 job 内）。"""
+    if not job:
+        return False
+    try:
+        kernel32 = ctypes.windll.kernel32
+        desired = 0x0100 | 0x0001 | 0x0400  # SET_QUOTA | TERMINATE | QUERY_INFORMATION
+        handle = kernel32.OpenProcess(desired, False, pid)
+        if not handle:
+            return False
+        try:
+            return bool(kernel32.AssignProcessToJobObject(job, handle))
+        finally:
+            kernel32.CloseHandle(handle)
+    except Exception:
+        return False
+
+
+def _terminate_job(job):
+    if not job:
+        return
+    try:
+        ctypes.windll.kernel32.TerminateJobObject(job, 1)
+    except Exception:
+        pass
+
+
+def _close_job(job):
+    if not job:
+        return
+    try:
+        ctypes.windll.kernel32.CloseHandle(job)
+    except Exception:
+        pass
+
+
 def resolve_path(file_path):
     p = Path(file_path)
     if p.is_absolute():
@@ -215,6 +282,127 @@ def tool_run_command(command, cwd=None, timeout=60, env=None, wait=True, shell=N
                      close_input / kill_background 等交互。
                      默认为 True，保持原有行为。
     """
+    import re as _re
+    import ctypes as _ct
+    from ctypes import wintypes as _wt
+
+    # ---------- 内联 Job Object 辅助（仅 Windows） ----------
+    class _JBLI(_ct.Structure):
+        _fields_ = [
+            ("PerProcessUserTimeLimit", _wt.LARGE_INTEGER),
+            ("PerJobUserTimeLimit", _wt.LARGE_INTEGER),
+            ("LimitFlags", _wt.DWORD),
+            ("MinimumWorkingSetSize", _ct.c_size_t),
+            ("MaximumWorkingSetSize", _ct.c_size_t),
+            ("ActiveProcessLimit", _wt.DWORD),
+            ("Affinity", _ct.c_size_t),
+            ("PriorityClass", _wt.DWORD),
+            ("SchedulingClass", _wt.DWORD),
+        ]
+
+    def _new_job():
+        if sys.platform != "win32":
+            return None
+        try:
+            k32 = _ct.windll.kernel32
+            j = k32.CreateJobObjectW(None, None)
+            if not j:
+                return None
+            info = _JBLI()
+            info.PerProcessUserTimeLimit = 0
+            info.PerJobUserTimeLimit = 0
+            info.LimitFlags = 0x2000  # JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE
+            info.MinimumWorkingSetSize = 0
+            info.MaximumWorkingSetSize = 0
+            info.ActiveProcessLimit = 0
+            info.Affinity = 0
+            info.PriorityClass = 0
+            info.SchedulingClass = 0
+            if not k32.SetInformationJobObject(
+                j, 2, _ct.byref(info), _ct.sizeof(info)
+            ):
+                k32.CloseHandle(j)
+                return None
+            return j
+        except Exception:
+            return None
+
+    def _assign_job(j, pid):
+        if not j:
+            return False
+        try:
+            k32 = _ct.windll.kernel32
+            h = k32.OpenProcess(0x0100 | 0x0001 | 0x0400, False, pid)
+            if not h:
+                return False
+            try:
+                return bool(k32.AssignProcessToJobObject(j, h))
+            finally:
+                k32.CloseHandle(h)
+        except Exception:
+            return False
+
+    def _terminate_job(j):
+        if not j:
+            return
+        try:
+            _ct.windll.kernel32.TerminateJobObject(j, 1)
+        except Exception:
+            pass
+
+    def _close_job(j):
+        if not j:
+            return
+        try:
+            _ct.windll.kernel32.CloseHandle(j)
+        except Exception:
+            pass
+
+    def _kill_pids_from_output(text):
+        """从命令输出里抠 pid=NNN 并 taskkill。Job Object 分配失败时的主兜底。
+
+        原命令 `Write-Output ('server_pid=' + $p.Id)` 就是把 pid 写进 stdout，
+        这里不依赖 ppid 关系（PowerShell 退出后孙进程已重新父化），直接按 pid 杀。
+        """
+        if sys.platform != "win32" or not text:
+            return
+        pids = set()
+        for m in _re.finditer(
+            r'(?:pid|processid|进程)\s*[=:：]\s*(\d+)', text, _re.IGNORECASE
+        ):
+            pids.add(m.group(1))
+        for pid in pids:
+            try:
+                subprocess.run(
+                    ["taskkill", "/F", "/T", "/PID", pid],
+                    capture_output=True, timeout=3,
+                )
+            except Exception:
+                pass
+
+    def _kill_descendants(root_pid, max_depth=5):
+        """递归杀掉 ppid=root_pid 的所有子孙。ppid 关系尚未丢时的兜底。"""
+        if sys.platform != "win32" or not root_pid:
+            return
+        try:
+            script = (
+                f"$rootPid = {int(root_pid)}; "
+                f"function Kill-Children {{ "
+                f"  param([int]$ppid, [int]$depth); "
+                f"  if ($depth -gt {max_depth}) {{ return }}; "
+                f"  $cs = Get-CimInstance Win32_Process "
+                f"  -Filter \"ParentProcessId=$ppid\" -ErrorAction SilentlyContinue; "
+                f"  foreach ($c in $cs) {{ "
+                f"    Kill-Children -ppid $c.ProcessId -depth ($depth + 1); "
+                f"    Stop-Process -Id $c.ProcessId -Force -ErrorAction SilentlyContinue "
+                f"  }} "
+                f"}}; "
+                f"Kill-Children -ppid $rootPid -depth 0"
+            )
+            subprocess.run(wrap_powershell(script), capture_output=True, timeout=10)
+        except Exception:
+            pass
+
     # ---------- 规范化 command / shell ----------
     if shell is False:
         if isinstance(command, (str, bytes)):
@@ -246,6 +434,8 @@ def tool_run_command(command, cwd=None, timeout=60, env=None, wait=True, shell=N
     env_vars = {**os.environ, **(env or {})}
     process = None
     timed_out = threading.Event()
+    job = None
+    assigned = False
 
     def force_kill():
         """超时强杀回调"""
@@ -306,25 +496,53 @@ def tool_run_command(command, cwd=None, timeout=60, env=None, wait=True, shell=N
                 f"可用 send_input / read_output / close_input / kill_background / list_background 与其交互。"
             )
 
-        # 启动超时定时器
-        timer = threading.Timer(timeout, force_kill)
-        timer.daemon = True
-        timer.start()
+        # ==================== 同步模式（wait=True） ====================
+        # 用独立 Job Object 管理进程树；poll() 轮询代替 communicate()。
+        # 不用 communicate()：孙进程（Start-Process 拉起的 java 等）会继承
+        # PowerShell 的 stdout/stderr 写端，PowerShell 退出后 EOF 永远不来，
+        # communicate() 永久阻塞，超时定时器也救不回来。
+        job = _new_job()
+        assigned = _assign_job(job, process.pid)
+        if job and not assigned:
+            from ds.logger import LOGGER
+            LOGGER.warn(
+                f"AssignProcessToJobObject 失败 (PID: {process.pid})，"
+                f"将改用输出解析 + Get-CimInstance 清理子孙进程"
+            )
 
-        stdout_b, stderr_b = process.communicate()
-        timer.cancel()
+        session = _BGSession(process)
+        deadline = time.time() + timeout
 
-        stdout = decode_bytes(stdout_b or b"")
-        stderr = decode_bytes(stderr_b or b"")
+        while process.poll() is None:
+            if time.time() >= deadline:
+                timed_out.set()
+                break
+            time.sleep(0.05)
+
+        # 给读取线程一点时间把剩余输出读完
+        time.sleep(0.2)
+        stdout, stderr = session.read_output(clear=False)
+        output = stdout + stderr
+
+        # 【关键】不论正常退出还是超时，都必须清理所有派生进程。
+        # PowerShell 退出后 Start-Process 拉起的 java 等仍在后台初始化，
+        # forge 服务端几十秒后自己爬起来监听 25565——这就是上次没杀干净的原因。
+        # 需要长期运行的服务应当使用 wait=False，而不是在 wait=True 里漏进程。
+        #
+        # 【绝不能 close process.stdout/stderr】
+        # reader 线程阻塞在 readline() 持锁，BufferedReader.close() 会死等同一把锁。
+        if assigned:
+            _terminate_job(job)              # 杀 Job 内所有进程（含 PowerShell 派生的一切）
+        else:
+            _kill_pids_from_output(output)   # 从输出里抠 server_pid=NNN 直接杀（主兜底）
+            _kill_descendants(process.pid)   # ppid 关系尚未丢时的补充兜底
 
         if timed_out.is_set():
-            output = stdout + stderr
             raise RuntimeError(
                 f"最后输出：\n{truncate(output or '无输出')}\n"
                 f"命令执行超时（{timeout} 秒），已被强制终止"
             )
 
-        output = stdout + stderr
         if process.returncode != 0:
             raise RuntimeError(
                 f"命令执行失败（退出码 {process.returncode}）：\n{truncate(output or '无输出')}"
@@ -335,6 +553,7 @@ def tool_run_command(command, cwd=None, timeout=60, env=None, wait=True, shell=N
         raise RuntimeError(f"命令执行错误: {e}")
 
     finally:
+        _close_job(job)
         if wait and process and process.poll() is None:
             _kill_process_tree(process, process.pid)
 
@@ -577,16 +796,3 @@ TOOLS["abort_task"] = {
     },
     "execute": tool_abort_task,
 }
-
-if __name__ == "__main__":
-    def main():
-        cmd = r"python D:\0.0\temp\dstmp\exec_remote.py D:\0.0\temp\dstmp\wan_diag.ps1 w"
-        print("=" * 50)
-        print(f"[命令] {cmd}")
-        print("=" * 50)
-        try:
-            print(tool_run_command(cmd, timeout=90))
-        except Exception as e:
-            print(f"[异常] {e}")
-
-    main()

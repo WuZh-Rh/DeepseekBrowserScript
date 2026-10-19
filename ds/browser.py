@@ -357,42 +357,45 @@ class DeepSeekBrowser:
         """
         获取当前对话所有消息，格式与 ConversationManager.messages 一致：
             [{"role": "user"|"assistant", "content": str}, ...]
-        助手消息自动拼接思考 + 输出，与 _extract_last_message 输出格式保持一致。
+        覆盖三种助手消息：
+          1. think + answer
+          2. 只有 think（tool_call 在 think 里）
+          3. 只有 answer
         """
         return self.page.evaluate("""
             () => {
-                const nodes = document.querySelectorAll(
-                    '.fbb737a4, .ds-assistant-message-main-content'
-                );
+                const cleanText = (root, selectors) => {
+                    const clone = root.cloneNode(true);
+                    clone.querySelectorAll(selectors).forEach(x => x.remove());
+                    return clone.textContent.trim();
+                };
+                const REMOVE = '.md-code-block-banner-wrap, .ds-button, button, [role="button"], svg';
                 const result = [];
-                for (const el of nodes) {
-                    if (el.classList.contains('fbb737a4')) {
-                        const content = el.textContent.trim();
+                for (const el of document.querySelectorAll('.ds-message')) {
+                    const userEl = el.querySelector('.fbb737a4');
+                    if (userEl) {
+                        const content = userEl.textContent.trim();
                         if (content) result.push({ role: 'user', content });
                         continue;
                     }
-                    // 助手消息
-                    const msgEl = el.closest('.ds-message') || el;
-                    const thinking = Array.from(
-                        msgEl.querySelectorAll('.ds-think-content')
-                    ).map(x => x.textContent.trim()).filter(Boolean).join('\\n');
-
-                    const clone = el.cloneNode(true);
-                    clone.querySelectorAll(
-                        '.ds-think-content, .md-code-block-banner-wrap, ' +
-                        '.ds-button, button, [role="button"], svg'
-                    ).forEach(x => x.remove());
-                    const answer = clone.textContent.trim();
+                    const thinking = Array.from(el.querySelectorAll('.ds-think-content'))
+                        .map(x => cleanText(x, REMOVE))
+                        .filter(Boolean)
+                        .join('\\n');
+                    const answerEl = el.querySelector('.ds-assistant-message-main-content');
+                    const answer = answerEl ? cleanText(answerEl, '.ds-think-content, ' + REMOVE) : '';
 
                     let content;
                     if (thinking && answer) {
                         content = '【思考】\\n' + thinking + '\\n\\n【输出】\\n' + answer;
                     } else if (thinking) {
                         content = thinking;
-                    } else {
+                    } else if (answer) {
                         content = answer;
+                    } else {
+                        continue;
                     }
-                    if (content) result.push({ role: 'assistant', content });
+                    result.push({ role: 'assistant', content });
                 }
                 return result;
             }

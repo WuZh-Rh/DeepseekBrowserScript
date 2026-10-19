@@ -239,9 +239,11 @@ def main():
     LOGGER.info(f"会话锁已获取: {CONFIG['SESSION_DIR']}")
     # -----------------------------------
 
-    CONFIG["PROMPT_FILE"] = (Path("prompt") / (args.session_dir + ".txt")).resolve()
-    if not Path(CONFIG["PROMPT_FILE"]).exists():
-        Path(CONFIG["PROMPT_FILE"]).touch()
+    prompt_path = (Path("prompt") / (args.session_dir + ".txt")).resolve()
+    prompt_path.parent.mkdir(parents=True, exist_ok=True)
+    if not prompt_path.exists():
+        prompt_path.touch()
+    CONFIG["PROMPT_FILE"] = prompt_path
     if args.test_bat:
         CONFIG["TEST_BAT_PATH"] = str(Path(args.test_bat).resolve())
     if args.max_iterations is not None:

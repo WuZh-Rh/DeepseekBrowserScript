@@ -20,7 +20,8 @@ from ds.utils import decode_bytes
 
 
 def _get_prompt():
-    prompt_file = CONFIG["PROMPT_FILE"]
+    prompt_file = Path(CONFIG["PROMPT_FILE"])
+    prompt_file.parent.mkdir(parents=True, exist_ok=True)
     if not prompt_file.exists():
         prompt_file.touch()
     with open(prompt_file, "r", encoding="utf-8") as f:

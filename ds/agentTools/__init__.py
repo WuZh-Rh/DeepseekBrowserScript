@@ -74,3 +74,19 @@ def execute_tool(name, args) -> dict[str, str]:
     except Exception as e:
         # 捕获异常并重新抛出，让上层处理
         raise RuntimeError(f"工具执行错误: {e}") from e
+
+
+def tool_list_tools():
+    """列出当前允许调用的所有工具（复用 get_tool_descriptions 的过滤与格式）。"""
+    allow = CONFIG.get("allow_tools", [])
+    names = [n for n in TOOLS if not allow or n in allow]
+    if not names:
+        return "当前没有允许调用的工具。"
+    return f"共 {len(names)} 个可用工具：\n\n{get_tool_descriptions()}"
+
+
+TOOLS["list_tools"] = {
+    "description": "列出当前允许调用的所有工具，包含名称、描述和参数说明。",
+    "parameters": {},
+    "execute": tool_list_tools,
+}

@@ -263,19 +263,19 @@ def _kill_process_tree(process, pid):
 
 
 # 11. run_command
-def tool_run_command(command, cwd=None, timeout=60, env=None, wait=True, shell=None):
+def tool_run_command(command, cwd=None, timeout=60, env=None, wait=True, mode="auto"):
     """
     执行 shell 命令并返回其输出。默认在工作目录中运行。
 
     参数：
-        command: 要执行的命令。当 shell=False 时必须是 list/tuple。
-        shell:   控制命令的包装方式，默认 None（自动）。
-                 - None : Windows 走 PowerShell -EncodedCommand（绕开 cmd 解析），
-                          POSIX 走 /bin/sh -c。
-                 - True : 强制使用系统默认 shell（Windows 上是 cmd.exe /c），
-                          适合确实需要 cmd 内建命令（dir/type/copy 等）的场景。
-                 - False: 不做任何 shell 包装，command 必须是 list/tuple，
-                          直接交给 subprocess.Popen，跨平台行为最干净。
+        command: 要执行的命令。mode="exec" 时必须是 list/tuple。
+        mode:    控制命令的包装方式，默认 "auto"。
+                 - "auto"  : Windows 走 PowerShell -EncodedCommand（绕开 cmd 解析），
+                             POSIX 走 /bin/sh -c。
+                 - "shell" : 强制使用系统默认 shell（Windows 上是 cmd.exe /c），
+                             适合确实需要 cmd 内建命令（dir/type/copy 等）的场景。
+                 - "exec"  : 不做任何 shell 包装，command 必须是 list/tuple，
+                             直接交给 subprocess.Popen，跨平台行为最干净。
         wait (bool): 是否等待命令结束并获取输出。
                      若为 False，则命令在后台运行，工具立即返回启动信息，
                      并通过会话 ID（PID）支持后续 send_input / read_output /
@@ -403,25 +403,27 @@ def tool_run_command(command, cwd=None, timeout=60, env=None, wait=True, shell=N
         except Exception:
             pass
 
-    # ---------- 规范化 command / shell ----------
-    if shell is False:
+    # ---------- 规范化 command / mode ----------
+    mode = mode or "auto"
+
+    if mode == "exec":
         if isinstance(command, (str, bytes)):
             raise ValueError(
-                "shell=False 时 command 必须是 list 或 tuple，"
+                "mode='exec' 时 command 必须是 list 或 tuple，"
                 "例如 ['git', 'commit', '-m', 'feat: x']"
             )
         cmd_args = [str(x) for x in command]
         use_shell = False
-    elif shell is True:
+    elif mode == "shell":
         if not isinstance(command, str):
-            raise ValueError("shell=True 时 command 必须是字符串")
+            raise ValueError("mode='shell' 时 command 必须是字符串")
         cmd_args = command
         use_shell = True
-    else:  # shell is None -> 自动
+    elif mode == "auto":
         if not isinstance(command, str):
             raise ValueError(
-                "自动模式（shell=None）下 command 必须是字符串；"
-                "若想直接 exec 参数列表请显式传 shell=False"
+                "mode='auto' 时 command 必须是字符串；"
+                "若想直接传参数列表请显式传 mode='exec'"
             )
         if sys.platform == "win32":
             cmd_args = wrap_powershell(command)
@@ -429,6 +431,10 @@ def tool_run_command(command, cwd=None, timeout=60, env=None, wait=True, shell=N
         else:
             cmd_args = command
             use_shell = True
+    else:
+        raise ValueError(
+            f"未知 mode: {mode!r}，可选 'auto' / 'shell' / 'exec'"
+        )
 
     work_dir = resolve_path(cwd) if cwd else CONFIG["WORKING_DIR"]
     env_vars = {**os.environ, **(env or {})}
@@ -562,16 +568,21 @@ def tool_run_command(command, cwd=None, timeout=60, env=None, wait=True, shell=N
 TOOLS["run_command"] = {
     "description": (
         "执行 shell 命令并返回其输出。默认在工作目录中运行。"
-        "shell 参数控制命令的包装方式：默认（不传）时 Windows 走 PowerShell "
+        "mode 参数控制命令的包装方式：默认（不传）时 Windows 走 PowerShell "
         "（-EncodedCommand，绕开 cmd 的引号解析），POSIX 走 /bin/sh -c；"
-        "shell=True 强制使用系统默认 shell（Windows 上是 cmd.exe）；"
-        "shell=False 则把 command 当作参数列表直接 exec，不做任何 shell 包装。"
+        "mode='shell' 强制使用系统默认 shell（Windows 上是 cmd.exe）；"
+        "mode='exec' 则tools将会把 command 当作参数列表直接交给 Popen，不经任何 shell 包装。"
         "若设置 wait=False，命令在后台运行，工具立即返回 PID，"
         "后续可用 send_input / read_output / close_input / kill_background 与之交互。"
+        "使用规则："
+        "1) 批量调用按顺序执行，中途失败会中断后续，含高风险/必失败项的命令不要夹在批次中间。"
+        "2) 同一问题验证过一遍就够了，不要换参数反复重测；用户没要求对照实验时，不做对照实验。"
+        "3) 不要把「搞清楚工具/环境的行为」升格成新任务做多轮测试。拿到能推进目标的信息后，"
+        "   下一轮必须推进原任务本身。不允许以「再做最后一轮验证」结束一轮响应。"
     ),
     "parameters": {
         "command": {"type": "string", "required": True,
-                    "description": "要执行的命令。shell=False 时必须传入字符串数组"},
+                    "description": "要执行的命令。mode='exec' 时必须传入字符串数组"},
         "cwd": {"type": "string", "required": False, "description": "命令的工作目录"},
         "timeout": {"type": "number", "required": False,
                     "description": "超时时间（秒），默认 60，仅当 wait=True 时有效"},
@@ -579,10 +590,9 @@ TOOLS["run_command"] = {
         "wait": {"type": "boolean", "required": False,
                  "description": "是否等待命令完成并返回输出，默认 True。"
                                 "设为 False 时命令后台运行，立即返回 PID。"},
-        "shell": {"type": "boolean", "required": False,
-                  "description": "命令包装方式。不传=自动（推荐）；"
-                                 "True=使用系统默认 shell（Windows 上是 cmd）；"
-                                 "False=直接 exec 参数列表（command 需为数组）。"},
+        "mode": {"type": "string", "required": False, "default": "auto",
+                 "description": "命令包装方式：'auto'（默认，推荐）、'shell'（系统默认 shell，"
+                                "Windows 上是 cmd）、'exec'（参数列表直接交给 Popen，command 需为数组）。"},
     },
     "execute": tool_run_command,
 }

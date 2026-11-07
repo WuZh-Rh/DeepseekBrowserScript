@@ -35,7 +35,6 @@ def parse_args():
         "-m", "--max-iterations",
         "-S", "--session-dir",
         "--task-path", "--load-file",
-        "--mode",
     }
     # 多值选项（nargs='+'）
     _MULTI_VALUE_OPTS = {"--deny-tools", "--ext-tools"}
@@ -81,8 +80,6 @@ def parse_args():
                        help="指定会话目录")
         p.add_argument("--deny-tools", nargs='+', default=d(None), help="禁用指定的工具")
         p.add_argument("--ext-tools", nargs='+', default=d(None), help="扩展工具")
-        p.add_argument("--mode", choices=["fast", "expert", "vision"], default=d("fast"),
-                       help="DeepSeek 模式")
         p.add_argument("--task-path", default=d(None), help="从文件读取任务内容")
         p.add_argument("--load-file", default=d(None), help="上传/加载指定文件")
 
@@ -107,7 +104,7 @@ def parse_args():
       python -m ds resume -T 爬虫          # 衔接标题含“爬虫”的对话，继续
       python -m ds resume "新任务"         # 衔接最近一次对话，并发起新任务
 
-    注意：全局参数（-S/-d/-m/--mode 等）在子命令前后都可以用。
+    注意：全局参数（-S/-d/-m 等）在子命令前后都可以用。
             """,
     )
 
@@ -210,8 +207,6 @@ def main():
         CONFIG["DEBUG"] = True
     if args.headless:
         CONFIG["HEADLESS"] = True
-    if args.mode:
-        CONFIG["MODE"] = args.mode
     if args.working_dir:
         resolved = Path(args.working_dir).resolve()
         if not resolved.exists():
@@ -335,7 +330,6 @@ def main():
 
     try:
         agent.init()
-        agent.browser.set_mode(CONFIG["MODE"])
     except Exception as e:
         error_str = traceback.format_exc()
         LOGGER.error(f"任务失败: {e}")

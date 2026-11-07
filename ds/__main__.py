@@ -244,6 +244,7 @@ def main():
     if not prompt_path.exists():
         prompt_path.touch()
     CONFIG["PROMPT_FILE"] = prompt_path
+    open(prompt_path, "w", encoding="utf-8").close()
     if args.test_bat:
         CONFIG["TEST_BAT_PATH"] = str(Path(args.test_bat).resolve())
     if args.max_iterations is not None:

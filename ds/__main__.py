@@ -260,14 +260,19 @@ def main():
         CONFIG["EXT_TOOLS"] = []
     from ds.agentTools import init_tools
     init_tools()
+    from ds.agentTools import TOOLS
     if args.deny_tools:
-        from ds.agentTools import TOOLS
+        unknown = [t for t in args.deny_tools if t not in TOOLS]
+        if unknown:
+            LOGGER.error(f"未知的工具名: {', '.join(unknown)}")
+            LOGGER.error(f"可用工具: {', '.join(TOOLS.keys())}")
+            sys.exit(1)
+
         CONFIG["allow_tools"] = [
             tool_name for tool_name in TOOLS.keys()
             if tool_name not in args.deny_tools
         ]
     else:
-        from ds.agentTools import TOOLS
         CONFIG["allow_tools"] = [
             tool_name for tool_name in TOOLS.keys()
         ]

@@ -9,7 +9,17 @@ import os
 import sys
 import subprocess
 import traceback
+import threading
 from pathlib import Path
+
+# 引入 prompt_toolkit
+try:
+    from prompt_toolkit import PromptSession
+    from prompt_toolkit.patch_stdout import patch_stdout
+
+    _HAS_PT = True
+except ImportError:
+    _HAS_PT = False
 
 from ds.config import CONFIG
 from ds.logger import LOGGER
@@ -27,7 +37,7 @@ def _get_prompt():
     with open(prompt_file, "r", encoding="utf-8") as f:
         result = f.read()
     open(prompt_file, 'w').close()
-    return ("\n" + result) if result else ""
+    return ("用户发送了消息:\n" + result) if result else ""
 
 
 class DeepSeekAgent:
@@ -133,7 +143,54 @@ class DeepSeekAgent:
             return {"passed": False, "output": str(e)}
 
     def run(self, task, no_send=False):
+        """
+        主入口：主线程跑真实业务，后台线程跑输入，patch_stdout 负责协调渲染。
+        """
         self._running = True
+
+        # 降级：没装依赖或不是真实终端（比如 PyCharm 管道），直接走纯阻塞老路
+        if not _HAS_PT or not sys.stdin or not sys.stdin.isatty():
+            return self._run_loop(task, no_send)
+
+        # 启动后台线程负责接收输入
+        def input_worker():
+            session = PromptSession()
+            while True:
+                try:
+                    line = session.prompt("❯ ")
+                    if line.strip():
+                        with open(CONFIG["PROMPT_FILE"], "a", encoding="utf-8") as f:
+                            f.write("\n" + line)
+                        # 【新增】回车后的提示反馈（高亮青色）
+                        print("\033[96m补充说明已记录，将在下一轮对话发送给 DeepSeek 时生效。\033[0m")
+                except KeyboardInterrupt:
+                    # 用户按下 Ctrl+C 终止输入流
+                    print("\033[93m⚠️ 实时输入已中断。\033[0m")
+                    break
+                except EOFError:
+                    break
+                except Exception:
+                    break
+
+        t = threading.Thread(target=input_worker, daemon=True)
+        t.start()
+
+        # 给点时间让输入框画出来，再开始疯狂打印日志
+        import time
+        time.sleep(0.1)
+        LOGGER.info("实时输入已开启 —— 运行中可随时输入，下次发给 DeepSeek 时自动附带。")
+
+        try:
+            # 主线程被 patch_stdout 包裹
+            # raw=True 保证颜色代码不会被转义，完美输出
+            with patch_stdout(raw=True):
+                return self._run_loop(task, no_send)
+        finally:
+            # 主逻辑结束，后台守护线程会自动销毁
+            pass
+
+    def _run_loop(self, task, no_send=False):
+        """原本的 run 方法逻辑完整保留，这部分完全跑在主线程"""
         max_iter = CONFIG["MAX_ITERATIONS"]
 
         if no_send:
